@@ -401,8 +401,25 @@ class TelegramChannel(BaseChannel):
                 logger.error("Failed to download media: {}", e)
                 content_parts.append(f"[{media_type}: download failed]")
         
+        # Include reply context so bot understands conversation threading
+        if message.reply_to_message:
+            reply = message.reply_to_message
+            reply_sender = reply.from_user
+            reply_name = (reply_sender.first_name or reply_sender.username or "someone") if reply_sender else "someone"
+            reply_text = reply.text or reply.caption or ""
+            if reply_text:
+                # Truncate long replies to keep context concise
+                if len(reply_text) > 200:
+                    reply_text = reply_text[:200] + "..."
+                content_parts.insert(0, f"[replying to {reply_name}: \"{reply_text}\"]")
+
         content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
+
+        # Prefix sender name in group chats for multi-user context
+        if message.chat.type != "private":
+            sender_name = user.first_name or user.username or "Unknown"
+            content = f"[{sender_name}]: {content}"
+
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
         
         str_chat_id = str(chat_id)
