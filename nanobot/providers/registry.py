@@ -236,6 +236,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_oauth=True,                      # OAuth-based authentication
     ),
 
+    # Claude CLI: subscription-based, no API key. Uses Claude Code CLI subprocess.
+    ProviderSpec(
+        name="claude_cli",
+        keywords=("claude-cli", "claude_cli"),
+        env_key="",                         # No API key — subscription-based
+        display_name="Claude CLI",
+        litellm_prefix="",                  # Not routed through LiteLLM
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_direct=True,                     # Bypasses LiteLLM entirely
+    ),
+
     # DeepSeek: needs "deepseek/" prefix for LiteLLM routing.
     ProviderSpec(
         name="deepseek",

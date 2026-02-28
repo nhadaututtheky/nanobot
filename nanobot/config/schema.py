@@ -242,6 +242,14 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
+class ClaudeCLIConfig(Base):
+    """Claude CLI provider configuration (subscription-based, no API key)."""
+
+    project_dir: str = ""              # Working directory for CLI process
+    permission_mode: str = "bypassPermissions"
+    timeout: int = 120                 # Seconds before CLI call times out
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
@@ -262,6 +270,7 @@ class ProvidersConfig(Base):
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎) API gateway
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    claude_cli: ClaudeCLIConfig = Field(default_factory=ClaudeCLIConfig)  # Claude CLI (subscription)
 
 
 class HeartbeatConfig(Base):
@@ -355,20 +364,20 @@ class Config(BaseSettings):
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or p.api_key:
+                if spec.is_oauth or spec.is_direct or p.api_key:
                     return p, spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
-                if spec.is_oauth or p.api_key:
+                if spec.is_oauth or spec.is_direct or p.api_key:
                     return p, spec.name
 
         # Fallback: gateways first, then others (follows registry order)
-        # OAuth providers are NOT valid fallbacks — they require explicit model selection
+        # OAuth and direct providers are NOT valid fallbacks — they require explicit selection
         for spec in PROVIDERS:
-            if spec.is_oauth:
+            if spec.is_oauth or spec.is_direct:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:

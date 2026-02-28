@@ -204,6 +204,7 @@ def _make_provider(config: Config):
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.custom_provider import CustomProvider
+    from nanobot.providers.claude_cli_provider import ClaudeCLIProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
@@ -212,6 +213,17 @@ def _make_provider(config: Config):
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
+
+    # Claude CLI (subscription-based, no API key)
+    if provider_name == "claude_cli" or model.startswith("claude-cli/"):
+        cli_cfg = config.providers.claude_cli
+        return ClaudeCLIProvider(
+            default_model=model,
+            project_dir=cli_cfg.project_dir or None,
+            permission_mode=cli_cfg.permission_mode,
+            timeout=float(cli_cfg.timeout),
+            mcp_servers=config.tools.mcp_servers or None,
+        )
 
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     if provider_name == "custom":
@@ -223,7 +235,7 @@ def _make_provider(config: Config):
 
     from nanobot.providers.registry import find_by_name
     spec = find_by_name(provider_name)
-    if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
+    if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and (spec.is_oauth or spec.is_direct)):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers section")
         raise typer.Exit(1)
@@ -998,6 +1010,13 @@ def status():
                 continue
             if spec.is_oauth:
                 console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
+            elif spec.is_direct:
+                # Direct providers (e.g. Claude CLI) — check CLI availability
+                from nanobot.providers.claude_cli_provider import _get_cli_path
+                if _get_cli_path():
+                    console.print(f"{spec.label}: [green]✓ (CLI installed)[/green]")
+                else:
+                    console.print(f"{spec.label}: [yellow]CLI not found[/yellow]")
             elif spec.is_local:
                 # Local deployments show api_base instead of api_key
                 if p.api_base:

@@ -17,7 +17,7 @@ class MCPToolWrapper(Tool):
     def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
         self._session = session
         self._original_name = tool_def.name
-        self._name = f"mcp_{server_name}_{tool_def.name}"
+        self._name = tool_def.name  # Use original name for cleaner LLM interaction
         self._description = tool_def.description or tool_def.name
         self._parameters = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._tool_timeout = tool_timeout
@@ -91,6 +91,9 @@ async def connect_mcp_servers(
             tools = await session.list_tools()
             for tool_def in tools.tools:
                 wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
+                if registry.get(wrapper.name):
+                    logger.warning("MCP tool '{}' from '{}' overwrites existing tool with same name",
+                                   wrapper.name, name)
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
 
