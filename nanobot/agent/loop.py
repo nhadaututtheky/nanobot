@@ -126,15 +126,11 @@ class AgentLoop:
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy).
 
-        Skipped when provider handles MCP natively (e.g. Claude CLI with --mcp-config).
+        Always connects MCP servers directly so tools are registered in NanoBot's
+        tool registry — including when using Claude CLI provider (which uses --print
+        one-shot mode and does not handle MCP natively).
         """
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
-            return
-        # Claude CLI provider delegates MCP to CLI subprocess via env inheritance
-        from nanobot.providers.claude_cli_provider import ClaudeCLIProvider
-        if isinstance(self.provider, ClaudeCLIProvider) and self.provider.mcp_servers:
-            logger.info("MCP servers delegated to Claude CLI provider (env inheritance)")
-            self._mcp_connected = True
             return
         self._mcp_connecting = True
         from nanobot.agent.tools.mcp import connect_mcp_servers
@@ -232,6 +228,13 @@ class AgentLoop:
                         messages, tool_call.id, tool_call.name, result
                     )
             else:
+                # Suppress error responses (timeout, CLI errors) — don't send to channel
+                if response.finish_reason == "error":
+                    logger.warning("LLM returned error response, suppressing: %s",
+                                   (response.content or "")[:200])
+                    final_content = None
+                    break
+
                 clean = self._strip_think(response.content)
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
@@ -300,10 +303,12 @@ class AgentLoop:
                 raise
             except Exception:
                 logger.exception("Error processing message for session {}", msg.session_key)
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content="Sorry, I encountered an error.",
-                ))
+                # Only send error to CLI, silently fail on channels (no spam in groups)
+                if msg.channel == "cli":
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=msg.channel, chat_id=msg.chat_id,
+                        content="Sorry, I encountered an error.",
+                    ))
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""

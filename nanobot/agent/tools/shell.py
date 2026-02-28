@@ -3,6 +3,7 @@
 import asyncio
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -74,12 +75,19 @@ class ExecTool(Tool):
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
 
         try:
+            # On Windows, prevent CMD window from popping up
+            extra_kwargs: dict[str, Any] = {}
+            if sys.platform == "win32":
+                import subprocess as _sp
+                extra_kwargs["creationflags"] = _sp.CREATE_NO_WINDOW
+
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
                 env=env,
+                **extra_kwargs,
             )
             
             try:

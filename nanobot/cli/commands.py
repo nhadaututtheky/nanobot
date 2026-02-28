@@ -388,6 +388,31 @@ def gateway(
     
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
     
+    # Create gateway WS server
+    from nanobot.gateway.server import start_gateway as _start_ws
+    from nanobot.gateway.broadcaster import Broadcaster
+    from nanobot.gateway.context import GatewayContext
+    from nanobot.gateway.dispatcher import Dispatcher
+    from nanobot.gateway.handlers import collect_routes
+    from nanobot.config.loader import get_config_path
+
+    broadcaster = Broadcaster()
+    gw_ctx = GatewayContext(
+        config=config,
+        config_path=get_config_path(),
+        agent=agent,
+        session_manager=session_manager,
+        cron=cron,
+        channels=channels,
+        heartbeat=heartbeat,
+        bus=bus,
+        broadcaster=broadcaster,
+    )
+    dispatcher = Dispatcher()
+    dispatcher.register(collect_routes())
+
+    console.print(f"[green]✓[/green] Gateway WS server on ws://{config.gateway.host}:{config.gateway.port}")
+
     async def run():
         try:
             await cron.start()
@@ -395,16 +420,18 @@ def gateway(
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
+                _start_ws(gw_ctx, dispatcher),
             )
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
+            await broadcaster.close_all(1001, "server shutdown")
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
             agent.stop()
             await channels.stop_all()
-    
+
     asyncio.run(run())
 
 

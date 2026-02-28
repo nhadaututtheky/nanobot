@@ -311,6 +311,12 @@ class ClaudeCLIProvider(LLMProvider):
 
         prompt_bytes = full_prompt.encode("utf-8")
 
+        # On Windows, prevent CMD window from popping up
+        kwargs: dict[str, Any] = {}
+        if sys.platform == "win32":
+            import subprocess as _sp
+            kwargs["creationflags"] = _sp.CREATE_NO_WINDOW
+
         proc = await asyncio.create_subprocess_exec(
             *args,
             stdin=asyncio.subprocess.PIPE,
@@ -318,6 +324,7 @@ class ClaudeCLIProvider(LLMProvider):
             stderr=asyncio.subprocess.PIPE,
             cwd=self.project_dir,
             env=env,
+            **kwargs,
         )
 
         try:

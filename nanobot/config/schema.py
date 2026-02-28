@@ -285,6 +285,7 @@ class GatewayConfig(Base):
 
     host: str = "0.0.0.0"
     port: int = 18790
+    token: str = ""  # Auth token for WS clients (empty = allow all)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
