@@ -7,8 +7,8 @@ import platform
 import time
 from typing import Any
 
-from nanobot.gateway.context import GatewayContext
 from nanobot.gateway.connection import ClientConnection
+from nanobot.gateway.context import GatewayContext
 from nanobot.gateway.protocol import GatewayError
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,6 @@ async def handle_system_presence(ctx: GatewayContext, conn: ClientConnection, pa
 async def handle_logs_tail(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:
     """Read last N lines from log file."""
     limit = params.get("limit", 100)
-    max_bytes = params.get("maxBytes", 64 * 1024)
     cursor = params.get("cursor")
 
     log_path = ctx.config.workspace_path / "logs" / "nanobot.log"
@@ -120,19 +119,19 @@ async def handle_update_run(ctx: GatewayContext, conn: ClientConnection, params:
 
 async def handle_usage_cost(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:
     """Aggregate cost from session usage data."""
-    start_date = params.get("startDate", "")
-    end_date = params.get("endDate", "")
     sessions_dir = ctx.config.workspace_path / "sessions"
     if not sessions_dir.exists():
         return {"totalCost": 0, "byModel": {}, "bySession": {}}
 
+    import json
+
     # Scan session files for usage metadata
     total_cost = 0.0
+    total_tokens = 0
     by_model: dict[str, float] = {}
     by_session: dict[str, float] = {}
 
     for f in sessions_dir.glob("*.jsonl"):
-        import json
         session_cost = 0.0
         try:
             for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -149,6 +148,9 @@ async def handle_usage_cost(ctx: GatewayContext, conn: ClientConnection, params:
                         session_cost += cost
                         model = entry.get("model", "unknown")
                         by_model[model] = by_model.get(model, 0) + cost
+                    tokens = usage.get("total_tokens", 0)
+                    if isinstance(tokens, int):
+                        total_tokens += tokens
         except Exception:
             continue
         if session_cost > 0:
@@ -156,7 +158,13 @@ async def handle_usage_cost(ctx: GatewayContext, conn: ClientConnection, params:
             by_session[key] = session_cost
             total_cost += session_cost
 
-    return {"totalCost": total_cost, "byModel": by_model, "bySession": by_session}
+    return {
+        "totalCost": total_cost,
+        "totalTokens": total_tokens,
+        "byModel": by_model,
+        "bySession": by_session,
+        "currency": "USD",
+    }
 
 
 ROUTES = {

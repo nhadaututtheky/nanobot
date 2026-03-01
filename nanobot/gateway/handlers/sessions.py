@@ -7,8 +7,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from nanobot.gateway.context import GatewayContext
 from nanobot.gateway.connection import ClientConnection
+from nanobot.gateway.context import GatewayContext
 from nanobot.gateway.protocol import GatewayError
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ async def handle_sessions_list(ctx: GatewayContext, conn: ClientConnection, para
 
 async def handle_sessions_patch(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:
     """Update session metadata (label, thinkingLevel, etc.)."""
-    key = params.get("key")
+    key = params.get("key") or params.get("sessionKey")
     if not key:
         raise GatewayError("INVALID_PARAMS", "key required")
 
@@ -62,7 +62,7 @@ async def handle_sessions_patch(ctx: GatewayContext, conn: ClientConnection, par
 
 async def handle_sessions_delete(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:
     """Delete a session and optionally its transcript."""
-    key = params.get("key")
+    key = params.get("key") or params.get("sessionKey")
     if not key:
         raise GatewayError("INVALID_PARAMS", "key required")
 
@@ -124,7 +124,7 @@ async def handle_sessions_usage_timeseries(
     ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any],
 ) -> Any:
     """Get usage timeseries for a specific session."""
-    key = params.get("key")
+    key = params.get("key") or params.get("sessionKey")
     if not key:
         raise GatewayError("INVALID_PARAMS", "key required")
 
@@ -160,7 +160,7 @@ async def handle_sessions_usage_logs(
     ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any],
 ) -> Any:
     """Read last N usage entries from session log."""
-    key = params.get("key")
+    key = params.get("key") or params.get("sessionKey")
     if not key:
         raise GatewayError("INVALID_PARAMS", "key required")
 

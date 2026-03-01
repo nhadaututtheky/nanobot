@@ -25,12 +25,12 @@ async def handle_channels_status(ctx: GatewayContext, conn: ClientConnection, pa
             "enabled": True,
             "running": channel is not None,
         }
-    return {"channels": status}
+    return status
 
 
 async def handle_channels_logout(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:
     """Stop a specific channel."""
-    channel_name = params.get("channel")
+    channel_name = params.get("channel") or params.get("channelId")
     if not channel_name:
         raise GatewayError("INVALID_PARAMS", "channel required")
 
