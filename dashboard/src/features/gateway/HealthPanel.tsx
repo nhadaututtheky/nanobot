@@ -169,52 +169,52 @@ export function HealthPanel() {
           )}
 
           {/* Service start/stop — pushed to right */}
-          {svc && (
-            <div className="flex items-center gap-2 ml-auto">
-              {svc.running ? (
-                <>
+          <div className="flex items-center gap-2 ml-auto">
+            {svc?.running || health?.reachable ? (
+              <>
+                {svc?.running && svc.pid && (
                   <Badge variant="outline" className="border-success/40 text-success text-xs">
                     PID {svc.pid}
                   </Badge>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs text-destructive hover:text-destructive"
-                    onClick={() => stopMutation.mutate()}
-                    disabled={isMutating}
-                    aria-label="Stop AI Gateway"
-                  >
-                    {stopMutation.isPending ? (
-                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                    ) : (
-                      <Square className="mr-1 h-3 w-3" />
-                    )}
-                    Stop
-                  </Button>
-                </>
-              ) : svc.binaryFound ? (
+                )}
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => startMutation.mutate()}
+                  className="h-7 text-xs text-destructive hover:text-destructive"
+                  onClick={() => stopMutation.mutate()}
                   disabled={isMutating}
-                  aria-label="Start AI Gateway"
+                  aria-label="Stop AI Gateway"
                 >
-                  {startMutation.isPending ? (
+                  {stopMutation.isPending ? (
                     <Loader2 className="mr-1 h-3 w-3 animate-spin" />
                   ) : (
-                    <Play className="mr-1 h-3 w-3" />
+                    <Square className="mr-1 h-3 w-3" />
                   )}
-                  Start Gateway
+                  Stop Gateway
                 </Button>
-              ) : (
-                <span className="text-xs text-muted-foreground">
-                  Binary not found
-                </span>
-              )}
-            </div>
-          )}
+              </>
+            ) : svc?.binaryFound ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => startMutation.mutate()}
+                disabled={isMutating}
+                aria-label="Start AI Gateway"
+              >
+                {startMutation.isPending ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                ) : (
+                  <Play className="mr-1 h-3 w-3" />
+                )}
+                Start Gateway
+              </Button>
+            ) : svc ? (
+              <span className="text-xs text-muted-foreground">
+                Binary not found
+              </span>
+            ) : null}
+          </div>
         </div>
 
         {/* Mutation error messages */}
