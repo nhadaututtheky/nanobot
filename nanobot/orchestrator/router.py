@@ -166,6 +166,10 @@ class ModelRouter:
             logger.warning("No models available for orchestrator — using smart fallback")
             self._registry = list(self._smart_fallback())
 
+        # Always ensure the currently active model is in the registry.
+        # This handles providers not in the built-in defaults (dashscope, together, etc.)
+        self._ensure_active_model_in_registry()
+
         logger.info(
             "Orchestrator registry: {} model(s) via {} provider(s) + {} gateway(s)",
             len(self._registry),
@@ -227,6 +231,46 @@ class ModelRouter:
 
         return available
 
+    def _ensure_active_model_in_registry(self) -> None:
+        """Guarantee the user's currently active model appears in the registry.
+
+        If the active provider/model isn't already covered (e.g. dashscope,
+        together, custom providers), inject it as the highest-tier entry so the
+        orchestrator actually uses the model the user has selected.
+        """
+        active_model = self._config.agents.defaults.model
+        active_provider = self._config.agents.defaults.provider
+
+        if not active_model:
+            return
+
+        # Already present?
+        if any(m.model == active_model for m in self._registry):
+            return
+
+        logger.info(
+            "Injecting active model {} ({}) into orchestrator registry",
+            active_model,
+            active_provider,
+        )
+        self._registry.insert(
+            0,
+            ModelCapability(
+                model=active_model,
+                provider=active_provider or "auto",
+                capabilities=(
+                    "reasoning",
+                    "coding",
+                    "research",
+                    "creative",
+                    "data_analysis",
+                    "summarization",
+                    "general",
+                ),
+                tier="high",  # treat the user's chosen model as highest priority
+            ),
+        )
+
     def _smart_fallback(self) -> tuple[ModelCapability, ...]:
         """Auto-generate entries when no models are available.
 
@@ -262,14 +306,17 @@ class ModelRouter:
                 ),
             )
 
-        # Last resort: use default model as mid-tier
+        # Last resort: use default model as high-tier with full capabilities
         default_model = self._config.agents.defaults.model
         return (
             ModelCapability(
                 model=default_model,
-                provider=self._config.agents.defaults.provider,
-                capabilities=("general",),
-                tier="mid",
+                provider=self._config.agents.defaults.provider or "auto",
+                capabilities=(
+                    "reasoning", "coding", "research", "creative",
+                    "data_analysis", "summarization", "general",
+                ),
+                tier="high",
             ),
         )
 
