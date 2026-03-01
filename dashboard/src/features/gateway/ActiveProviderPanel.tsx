@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { rpc } from '@/ws/rpc'
+import { useGatewayProviders } from '@/hooks/useGatewayProviders'
+import type { ProviderAuthState } from '@/types/gateway'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,6 +33,23 @@ function resolveProviderInfo(config: Record<string, unknown>): ProviderInfo {
   const defaults = agents?.defaults as Record<string, unknown> | undefined
   const model = (defaults?.model as string) ?? 'unknown'
   const provider = (defaults?.provider as string) ?? 'auto'
+
+  // Check for gateway OAuth models (openai/cc/..., openai/gc/..., etc.)
+  const GATEWAY_PREFIXES: Record<string, string> = {
+    cc: 'Claude (Subscription)', cx: 'Codex (Subscription)', gc: 'Gemini CLI (Subscription)',
+    gh: 'GitHub Copilot', if: 'iFlow (Free)', qw: 'Qwen (Free)', kr: 'Kiro (Free)',
+  }
+  const gwMatch = model.match(/^(?:openai\/)?(cc|cx|gc|gh|if|qw|kr)\//)
+  if (gwMatch) {
+    const gwPrefix = gwMatch[1]
+    return {
+      model,
+      provider,
+      providerType: 'api',
+      label: GATEWAY_PREFIXES[gwPrefix] ?? 'AI Gateway',
+      toolMode: 'AI Gateway proxy — NanoBot controls tools natively via function calling',
+    }
+  }
 
   // Determine provider type from model name — model prefix takes priority
   // over stale provider field (user may switch model without clearing provider)
@@ -111,6 +130,7 @@ function resolveProviderInfo(config: Record<string, unknown>): ProviderInfo {
 export function ActiveProviderPanel() {
   const queryClient = useQueryClient()
   const [showSwitcher, setShowSwitcher] = useState(false)
+  const { providers: oauthProviders } = useGatewayProviders()
 
   const { data: config, isLoading } = useQuery({
     queryKey: ['config-raw'],
@@ -126,6 +146,13 @@ export function ActiveProviderPanel() {
 
   const info = useMemo(() => config ? resolveProviderInfo(config) : null, [config])
 
+  // Resolve gateway proxy URL from config
+  const gatewayProxyUrl = useMemo(() => {
+    const gw = config?.gateway as Record<string, unknown> | undefined
+    const ai = gw?.aiGateway as Record<string, unknown> | undefined
+    return (ai?.proxyUrl as string) ?? 'http://localhost:20128/v1'
+  }, [config])
+
   const switchMutation = useMutation({
     mutationFn: async (newModel: string) => {
       const rawRes = await rpc.config.get() as { raw?: string; hash?: string }
@@ -140,6 +167,19 @@ export function ActiveProviderPanel() {
       defaults.model = newModel
       // Clear provider so it auto-detects from model prefix
       delete defaults.provider
+
+      // For gateway OAuth models (prefixed like cc/, gc/), set api_base to gateway proxy
+      const isGatewayModel = /^(cc|cx|gc|gh|if|qw|kr)\//.test(newModel)
+      if (isGatewayModel) {
+        // Wrap as openai-compatible with gateway proxy base
+        defaults.model = `openai/${newModel}`
+        if (!parsed.providers) parsed.providers = {}
+        const provs = parsed.providers as Record<string, Record<string, string>>
+        if (!provs.openai) provs.openai = {}
+        provs.openai.apiBase = gatewayProxyUrl
+        // Gateway uses api-keys from its own config, use any configured key
+        if (!provs.openai.apiKey) provs.openai.apiKey = 'gateway'
+      }
 
       await rpc.config.set({
         raw: JSON.stringify(parsed, null, 2),
@@ -229,6 +269,7 @@ export function ActiveProviderPanel() {
           <QuickSwitcher
             currentModel={info.model}
             config={config ?? {}}
+            oauthProviders={oauthProviders}
             onSwitch={(model) => switchMutation.mutate(model)}
             isSwitching={switchMutation.isPending}
           />
@@ -245,6 +286,7 @@ export function ActiveProviderPanel() {
 interface QuickSwitcherProps {
   currentModel: string
   config: Record<string, unknown>
+  oauthProviders: ProviderAuthState[]
   onSwitch: (model: string) => void
   isSwitching: boolean
 }
@@ -254,24 +296,52 @@ interface SwitchOption {
   label: string
   available: boolean
   reason?: string
+  group: 'oauth' | 'cli' | 'api'
 }
 
-function QuickSwitcher({ currentModel, config, onSwitch, isSwitching }: QuickSwitcherProps) {
+// Default models for each OAuth gateway prefix
+const OAUTH_MODELS: Record<string, { model: string; label: string }> = {
+  anthropic: { model: 'cc/claude-sonnet-4-5-20250929', label: 'Claude (Subscription)' },
+  codex: { model: 'cx/codex-mini-latest', label: 'Codex (Subscription)' },
+  gemini: { model: 'gc/gemini-2.5-pro', label: 'Gemini CLI (Subscription)' },
+  copilot: { model: 'gh/gpt-4.1', label: 'GitHub Copilot' },
+  iflow: { model: 'if/claude-sonnet-4-5-20250929', label: 'iFlow (Free)' },
+  qwen: { model: 'qw/qwen3-coder-plus', label: 'Qwen (Free)' },
+  kiro: { model: 'kr/claude-sonnet-4-5-20250929', label: 'Kiro (Free)' },
+}
+
+function QuickSwitcher({ currentModel, config, oauthProviders, onSwitch, isSwitching }: QuickSwitcherProps) {
   const providers = config?.providers as Record<string, Record<string, string>> | undefined
 
   const options: SwitchOption[] = useMemo(() => {
     const opts: SwitchOption[] = []
+
+    // OAuth gateway providers — show connected ones first
+    for (const oauthProv of oauthProviders) {
+      const oauthModel = OAUTH_MODELS[oauthProv.provider]
+      if (!oauthModel) continue
+      const email = oauthProv.authFile?.email ?? oauthProv.authFile?.label
+      opts.push({
+        model: oauthModel.model,
+        label: oauthModel.label + (email ? ` (${email})` : ''),
+        available: oauthProv.connected,
+        reason: oauthProv.connected ? undefined : 'Not connected',
+        group: 'oauth',
+      })
+    }
 
     // Claude CLI (always available if claude is installed)
     opts.push({
       model: 'claude-cli/sonnet',
       label: 'Claude CLI (Sonnet)',
       available: true,
+      group: 'cli',
     })
     opts.push({
       model: 'claude-cli/opus',
       label: 'Claude CLI (Opus)',
       available: true,
+      group: 'cli',
     })
 
     // API providers — check if key is configured
@@ -293,41 +363,73 @@ function QuickSwitcher({ currentModel, config, onSwitch, isSwitching }: QuickSwi
         label: p.label,
         available: key.length > 0,
         reason: key.length > 0 ? undefined : 'No API key',
+        group: 'api',
       })
     }
 
     return opts
-  }, [providers])
+  }, [providers, oauthProviders])
+
+  const GROUP_LABELS: Record<string, string> = {
+    oauth: 'Gateway (OAuth Subscriptions)',
+    cli: 'CLI Subprocess',
+    api: 'API Key Providers',
+  }
+  const GROUP_BADGE: Record<string, string> = {
+    oauth: 'border-primary/30 text-primary',
+    cli: 'border-warning/30 text-warning',
+    api: 'border-success/30 text-success',
+  }
+
+  // Group options and render with headers
+  const groups = ['oauth', 'cli', 'api'] as const
+  const grouped = groups.map((g) => ({
+    key: g,
+    label: GROUP_LABELS[g],
+    items: options.filter((o) => o.group === g),
+  })).filter((g) => g.items.length > 0)
+
+  // For matching current model — also match openai/ wrapped version
+  const normalizedCurrent = currentModel.replace(/^openai\//, '')
 
   return (
-    <div className="border border-border rounded-lg divide-y divide-border max-h-64 overflow-y-auto">
-      {options.map((opt) => {
-        const isCurrent = currentModel === opt.model
-        return (
-          <button
-            key={opt.model}
-            type="button"
-            className="flex items-center gap-3 w-full px-3 py-2 text-left hover:bg-muted/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-            disabled={isCurrent || !opt.available || isSwitching}
-            onClick={() => onSwitch(opt.model)}
-          >
-            <span className="text-xs font-medium flex-1 truncate">{opt.label}</span>
-            <span className="font-mono text-[10px] text-muted-foreground truncate max-w-[200px]">
-              {opt.model}
+    <div className="border border-border rounded-lg max-h-72 overflow-y-auto">
+      {grouped.map((group) => (
+        <div key={group.key}>
+          <div className="sticky top-0 bg-muted/60 backdrop-blur-sm px-3 py-1.5 border-b border-border">
+            <span className={`text-[10px] font-semibold uppercase tracking-wider ${GROUP_BADGE[group.key] ?? 'text-muted-foreground'}`}>
+              {group.label}
             </span>
-            {isCurrent && (
-              <Badge variant="outline" className="text-[10px] border-primary/40 text-primary shrink-0">
-                Active
-              </Badge>
-            )}
-            {!opt.available && opt.reason && (
-              <Badge variant="outline" className="text-[10px] border-destructive/40 text-destructive shrink-0">
-                {opt.reason}
-              </Badge>
-            )}
-          </button>
-        )
-      })}
+          </div>
+          {group.items.map((opt) => {
+            const isCurrent = normalizedCurrent === opt.model || currentModel === opt.model
+            return (
+              <button
+                key={opt.model}
+                type="button"
+                className="flex items-center gap-3 w-full px-3 py-2 text-left hover:bg-muted/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer border-b border-border last:border-b-0"
+                disabled={isCurrent || !opt.available || isSwitching}
+                onClick={() => onSwitch(opt.model)}
+              >
+                <span className="text-xs font-medium flex-1 truncate">{opt.label}</span>
+                <span className="font-mono text-[10px] text-muted-foreground truncate max-w-[200px]">
+                  {opt.model}
+                </span>
+                {isCurrent && (
+                  <Badge variant="outline" className="text-[10px] border-primary/40 text-primary shrink-0">
+                    Active
+                  </Badge>
+                )}
+                {!opt.available && opt.reason && (
+                  <Badge variant="outline" className="text-[10px] border-destructive/40 text-destructive shrink-0">
+                    {opt.reason}
+                  </Badge>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      ))}
     </div>
   )
 }
