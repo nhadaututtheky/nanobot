@@ -377,12 +377,26 @@ class GraphExecutor:
     # --- prompt building ---
 
     def _build_node_system_prompt(self, node: TaskNode) -> str:
-        """Build system prompt for a task node."""
+        """Build system prompt for a task node, including role persona."""
         import time as _time
         from datetime import datetime as dt
 
         now = dt.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = _time.strftime("%Z") or "UTC"
+
+        # Resolve persona from role config
+        effective_roles = self._config.agents.subagent.get_effective_roles()
+        role_cfg = effective_roles.get(node.worker_role)
+
+        role_desc = f"Your role: **{node.worker_role}**"
+        if role_cfg and (role_cfg.display_name or role_cfg.description):
+            display = role_cfg.display_name or node.worker_role
+            desc = role_cfg.description or ""
+            role_desc = f"Your role: **{display}** — {desc}"
+
+        persona_block = ""
+        if role_cfg and role_cfg.persona:
+            persona_block = f"\n## Persona & Communication Style\n{role_cfg.persona}\n"
 
         return f"""# Orchestrator Task Node ({node.worker_role})
 
@@ -391,9 +405,9 @@ class GraphExecutor:
 
 ## Role
 You are an AI agent executing a subtask as part of a larger goal.
-Your role: **{node.worker_role}**
+{role_desc}
 Task capability: **{node.capability.value}**
-
+{persona_block}
 ## Rules
 1. Complete ONLY this specific task — nothing else.
 2. Be thorough but concise in your output.

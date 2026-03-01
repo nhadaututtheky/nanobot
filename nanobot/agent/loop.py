@@ -95,6 +95,7 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
             mcp_servers=mcp_servers,
+            subagent_config=config.agents.subagent if config else None,
         )
 
         # Orchestrator components (None until _init_orchestrator is called)
