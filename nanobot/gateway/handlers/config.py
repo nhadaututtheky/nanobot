@@ -70,6 +70,17 @@ async def handle_config_set(ctx: GatewayContext, conn: ClientConnection, params:
 
     new_hash = await _validate_and_save(ctx, raw, params.get("baseHash"))
 
+    # Hot-reload config into running agent loop (sub-agent models, orchestrator router)
+    import json
+
+    from nanobot.config.schema import Config
+
+    try:
+        new_config = Config.model_validate(json.loads(raw))
+        ctx.agent.reload_config(new_config)
+    except Exception as exc:
+        logger.warning("Config hot-reload failed (will apply on restart): %s", exc)
+
     # Close all clients with 1012 (service restart) — UI handles graceful reconnect
     # Note: response is sent by dispatcher before this, since we return first
     import asyncio

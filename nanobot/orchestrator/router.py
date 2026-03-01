@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import urllib.request
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -157,9 +159,18 @@ class ModelRouter:
             if default.model not in user_models:
                 self._registry.append(default)
 
+        # Discover models from CLI Proxy API gateway
+        proxy_models = self._discover_proxy_models()
+        proxy_model_names = set()
+        for pm in proxy_models:
+            if pm.model not in user_models:
+                self._registry.append(pm)
+                proxy_model_names.add(pm.model)
+
         # Detect active providers + gateways, filter to reachable models
         self._active_providers = self._scan_active_providers()
         self._active_gateways = self._scan_active_gateways()
+        self._proxy_model_names = proxy_model_names  # models available via CLI Proxy API
         self._registry = self._get_available_models()
 
         if not self._registry:
@@ -171,10 +182,11 @@ class ModelRouter:
         self._ensure_active_model_in_registry()
 
         logger.info(
-            "Orchestrator registry: {} model(s) via {} provider(s) + {} gateway(s)",
+            "Orchestrator registry: {} model(s) via {} provider(s) + {} gateway(s) + {} proxy",
             len(self._registry),
             len(self._active_providers),
             len(self._active_gateways),
+            len(proxy_model_names),
         )
 
     def _scan_active_providers(self) -> set[str]:
@@ -208,18 +220,28 @@ class ModelRouter:
 
         A model is available if:
         1. Its provider has an API key (standard match), OR
-        2. Any active gateway can route it (gateways route any model)
+        2. Any active gateway can route it (gateways route any model), OR
+        3. The model was discovered from CLI Proxy API
         """
         has_gateway = len(self._active_gateways) > 0
         available: list[ModelCapability] = []
         seen: set[str] = set()
 
         # Detect providers configured as local proxies (not real API endpoints).
-        # Built-in default models for these providers may not be reachable.
+        # BUT exclude CLI Proxy API — it's a real gateway that can route multiple models.
+        ai_gw = self._config.gateway.ai_gateway
+        ai_gw_base = ai_gw.proxy_url.rstrip("/") if ai_gw.proxy_url else ""
+
         local_proxy_providers: set[str] = set()
+        has_cli_proxy = False
         for pname in self._active_providers:
             p = getattr(self._config.providers, pname, None)
-            if p and p.api_base and any(kw in p.api_base for kw in ("localhost", "127.0.0.1", "0.0.0.0")):
+            if not (p and p.api_base):
+                continue
+            base = p.api_base.rstrip("/")
+            if ai_gw_base and base == ai_gw_base:
+                has_cli_proxy = True  # CLI Proxy API — acts as universal gateway
+            elif any(kw in p.api_base for kw in ("localhost", "127.0.0.1", "0.0.0.0")):
                 local_proxy_providers.add(pname)
 
         # Track which models were explicitly configured by the user
@@ -229,9 +251,20 @@ class ModelRouter:
             if mc.model in seen:
                 continue
 
+            # Models discovered from CLI Proxy API are always available
+            if mc.model in self._proxy_model_names:
+                available.append(mc)
+                seen.add(mc.model)
+                continue
+
             # Skip built-in default models when their provider is a local proxy
-            # (user-configured models are always included — the user knows what's available)
             if mc.provider in local_proxy_providers and mc.model not in user_configured:
+                continue
+
+            # CLI Proxy API can route any model (acts as universal gateway)
+            if has_cli_proxy:
+                available.append(mc)
+                seen.add(mc.model)
                 continue
 
             # Direct provider match
@@ -246,6 +279,123 @@ class ModelRouter:
                 seen.add(mc.model)
 
         return available
+
+    def _discover_proxy_models(self) -> list[ModelCapability]:
+        """Query CLI Proxy API /v1/models to discover available models at startup.
+
+        Tries proxy_url first (port 20128), falls back to management host /v1/models.
+        Returns empty list on failure (graceful — proxy may not be running).
+        """
+        ai_gw = self._config.gateway.ai_gateway
+        if not ai_gw.proxy_url:
+            return []
+
+        # Build lookup from built-in registry for capability/tier matching
+        builtin_lookup: dict[str, ModelCapability] = {}
+        for mc in DEFAULT_CAPABILITY_REGISTRY:
+            # Key by short model name: "claude-opus-4-6", "gpt-4.1", etc.
+            short = mc.model.split("/", 1)[-1] if "/" in mc.model else mc.model
+            builtin_lookup[short] = mc
+
+        urls_to_try = [ai_gw.proxy_url.rstrip("/") + "/models"]
+        # Also try management host (same host, different port) as fallback
+        if ai_gw.management_url:
+            mgmt_base = ai_gw.management_url.rsplit("/v0", 1)[0]
+            mgmt_models = mgmt_base + "/v1/models"
+            if mgmt_models not in urls_to_try:
+                urls_to_try.append(mgmt_models)
+
+        for url in urls_to_try:
+            models = self._fetch_models_from_url(url, builtin_lookup)
+            if models:
+                logger.info("Discovered {} model(s) from CLI Proxy API ({})", len(models), url)
+                return models
+
+        logger.debug("CLI Proxy API not reachable — skipping model discovery")
+        return []
+
+    def _fetch_models_from_url(
+        self, url: str, builtin_lookup: dict[str, ModelCapability],
+    ) -> list[ModelCapability]:
+        """Fetch and parse /v1/models response from a URL."""
+        try:
+            req = urllib.request.Request(url, method="GET")
+            req.add_header("Accept", "application/json")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return []
+
+        # OpenAI-compatible format: {"data": [{"id": "model-name", ...}, ...]}
+        models_data = data.get("data", [])
+        if not models_data:
+            return []
+
+        result: list[ModelCapability] = []
+        seen: set[str] = set()
+        for item in models_data:
+            model_id = item.get("id", "")
+            if not model_id or model_id in seen:
+                continue
+            seen.add(model_id)
+
+            # Match against built-in registry by short name
+            short = model_id.split("/", 1)[-1] if "/" in model_id else model_id
+            # Also try with common prefixes stripped: "cc/claude-..." → "claude-..."
+            stripped = short.split("/", 1)[-1] if "/" in short else short
+
+            builtin = builtin_lookup.get(stripped) or builtin_lookup.get(short)
+
+            # Build the model name with openai/cc/ prefix for LiteLLM routing
+            full_model = f"openai/cc/{stripped}" if "/" not in model_id else model_id
+
+            if builtin:
+                result.append(ModelCapability(
+                    model=full_model,
+                    provider=builtin.provider,
+                    capabilities=builtin.capabilities,
+                    tier=builtin.tier,
+                    cost_input=builtin.cost_input,
+                    cost_output=builtin.cost_output,
+                    context_window=builtin.context_window,
+                ))
+            else:
+                # Unknown model — infer tier from name patterns
+                tier = self._infer_tier(stripped)
+                caps = self._infer_capabilities(stripped)
+                result.append(ModelCapability(
+                    model=full_model,
+                    provider="proxy",
+                    capabilities=tuple(caps),
+                    tier=tier,
+                ))
+
+        return result
+
+    @staticmethod
+    def _infer_tier(model_name: str) -> str:
+        """Infer model tier from name patterns."""
+        name = model_name.lower()
+        if any(kw in name for kw in ("opus", "pro", "max", "reasoner", "gpt-4.1")):
+            return "high"
+        if any(kw in name for kw in ("haiku", "nano", "mini", "flash", "small")):
+            return "low"
+        return "mid"
+
+    @staticmethod
+    def _infer_capabilities(model_name: str) -> list[str]:
+        """Infer capabilities from model name patterns."""
+        name = model_name.lower()
+        caps: list[str] = ["general"]
+        if any(kw in name for kw in ("opus", "pro", "reasoner", "o1", "o3", "thinking")):
+            caps.extend(["reasoning", "coding", "creative"])
+        if any(kw in name for kw in ("coder", "codestral", "code")):
+            caps.append("coding")
+        if any(kw in name for kw in ("sonnet", "gpt-4", "chat", "gemini")):
+            caps.extend(["coding", "reasoning"])
+        if any(kw in name for kw in ("haiku", "flash", "mini", "nano", "small")):
+            caps.extend(["research", "summarization"])
+        return list(dict.fromkeys(caps))  # dedupe preserving order
 
     def _ensure_active_model_in_registry(self) -> None:
         """Guarantee the user's currently active model appears in the registry.

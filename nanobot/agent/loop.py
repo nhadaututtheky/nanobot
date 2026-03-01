@@ -216,6 +216,28 @@ class AgentLoop:
         except Exception as e:
             logger.warning("Orchestrator init failed (continuing without): {}", e)
 
+    def reload_config(self, config: Config) -> None:
+        """Hot-reload config into running components (called after config save)."""
+        self._config = config
+
+        # Reload sub-agent config so per-role model overrides take effect
+        self.subagents.subagent_config = config.agents.subagent
+
+        # Rebuild orchestrator router with fresh model registry
+        if self.orchestrator_router is not None:
+            from nanobot.orchestrator.router import ModelRouter
+            try:
+                self.orchestrator_router = ModelRouter(config)
+                # Update decomposer's router reference
+                if self.orchestrator_decomposer is not None:
+                    self.orchestrator_decomposer._router = self.orchestrator_router
+                # Update executor's config reference
+                if self.orchestrator_executor is not None:
+                    self.orchestrator_executor._config = config
+                logger.info("Config hot-reloaded ({} models)", len(self.orchestrator_router.get_models_info()))
+            except Exception as e:
+                logger.warning("Orchestrator router reload failed: {}", e)
+
     def get_orchestrator_context(self) -> dict[str, Any] | None:
         """Return orchestrator components dict for GatewayContext, or None."""
         if not all(
