@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/common/PageHeader'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import type { GraphSummary, TaskGraph } from '@/types/orchestrator'
 import { GoalInput } from './GoalInput'
+import { SubAgentPanel } from './SubAgentPanel'
 import { OrchestratorSettings } from './OrchestratorSettings'
 import { TaskGraphView } from './TaskGraphView'
 import {
@@ -176,6 +177,9 @@ export function OrchestratorPage() {
             />
           ))}
         </div>
+
+        {/* Sub-Agent Configuration */}
+        <SubAgentPanel />
 
         {/* Telegram integration settings */}
         <OrchestratorSettings />

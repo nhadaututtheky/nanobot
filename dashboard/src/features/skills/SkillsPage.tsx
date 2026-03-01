@@ -1,17 +1,16 @@
-import { Puzzle, Server, Bot } from 'lucide-react'
+import { Puzzle, Server } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { InstalledSkillsPanel } from './InstalledSkillsPanel'
 import { MarketplaceSearch } from './MarketplaceSearch'
 import { MCPServersPanel } from './MCPServersPanel'
-import { SubAgentPanel } from './SubAgentPanel'
 
 export function SkillsPage() {
   return (
     <ErrorBoundary>
       <PageHeader
         title="Skills & Plugins"
-        description="Browse, install, and manage skills from ClawHub marketplace. Configure MCP servers and sub-agents."
+        description="Browse, install, and manage skills from ClawHub marketplace. Configure MCP servers."
       />
 
       <div className="space-y-8">
@@ -39,15 +38,6 @@ export function SkillsPage() {
             MCP Servers
           </h3>
           <MCPServersPanel />
-        </section>
-
-        {/* Sub-Agent Config */}
-        <section>
-          <h3 className="mb-4 flex items-center gap-2 text-base font-semibold">
-            <Bot className="h-4 w-4" />
-            Sub-Agent Configuration
-          </h3>
-          <SubAgentPanel />
         </section>
       </div>
     </ErrorBoundary>
