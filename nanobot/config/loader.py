@@ -67,26 +67,13 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
 
 def _ensure_gateway_token(config: Config, config_path: Path) -> None:
-    """Generate a random gateway token if none is set, and persist it."""
+    """Warn if no gateway token is set. Empty token = allow all connections."""
     if config.gateway.token:
         return
-    token = secrets.token_urlsafe(32)
-    config.gateway.token = token
-    logger.warning(
-        "No gateway token configured — generated one automatically. "
-        "Dashboard/clients must use this token to connect."
+    logger.info(
+        "No gateway token configured — all WS clients can connect without auth. "
+        "Set gateway.token in config.json to require authentication."
     )
-    # Persist to config file so it survives restarts
-    try:
-        data: dict = {}
-        if config_path.exists():
-            data = json.loads(config_path.read_text(encoding="utf-8"))
-        data.setdefault("gateway", {})["token"] = token
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        logger.info("Gateway token saved to {}", config_path)
-    except Exception as e:
-        logger.error("Failed to save gateway token to {}: {}", config_path, e)
 
 
 def _migrate_config(data: dict) -> dict:
