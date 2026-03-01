@@ -60,8 +60,28 @@ class GoalDecomposer:
     ) -> TaskGraph:
         """Send goal to LLM, parse JSON output, build and return a TaskGraph."""
         orchestrator_model = self._router.route_orchestrator()
+
+        # Resolve model: use router's pick, but fall back to provider default
+        # if the provider doesn't support arbitrary model routing (e.g. Claude CLI).
+        model_to_use = orchestrator_model.model
+        if hasattr(self._provider, "get_default_model"):
+            provider_default = self._provider.get_default_model()
+            # Claude CLI and similar subprocess providers ignore the model param —
+            # they always use their configured model. Detect by checking the provider class.
+            provider_cls = type(self._provider).__name__
+            if provider_cls in ("ClaudeCLIProvider",):
+                model_to_use = provider_default
+                logger.info(
+                    "Provider {} doesn't support model routing — using default {}",
+                    provider_cls,
+                    model_to_use,
+                )
+
         logger.info(
-            "Decomposing goal with {} (tier={})", orchestrator_model.model, orchestrator_model.tier
+            "Decomposing goal with {} (tier={}, effective={})",
+            orchestrator_model.model,
+            orchestrator_model.tier,
+            model_to_use,
         )
 
         user_content = f"Goal: {goal}"
@@ -74,23 +94,54 @@ class GoalDecomposer:
             {"role": "user", "content": user_content},
         ]
 
-        response = await self._provider.chat(
-            messages=messages,
-            model=orchestrator_model.model,
-            temperature=0.3,
-            max_tokens=4096,
-        )
+        # Try up to 2 times (initial + 1 retry) in case of empty/invalid JSON
+        raw = ""
+        last_error: Exception | None = None
 
-        raw = (response.content or "").strip()
-        # Strip markdown fences if the model wraps output
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        for attempt in range(2):
+            response = await self._provider.chat(
+                messages=messages,
+                model=model_to_use,
+                temperature=0.3,
+                max_tokens=4096,
+            )
 
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            logger.error("Decomposer JSON parse failed: {}", exc)
-            raise ValueError(f"LLM returned invalid JSON: {exc}") from exc
+            raw = (response.content or "").strip()
+            logger.debug(
+                "Decomposer attempt {} response ({}ch): {}",
+                attempt + 1,
+                len(raw),
+                raw[:300],
+            )
+
+            if not raw:
+                last_error = ValueError(
+                    f"LLM returned empty response (finish_reason={response.finish_reason})"
+                )
+                logger.warning("Decomposer got empty response, retrying...")
+                continue
+
+            # Strip markdown fences if the model wraps output
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+            try:
+                data = json.loads(raw)
+                last_error = None
+                break
+            except json.JSONDecodeError as exc:
+                last_error = ValueError(f"LLM returned invalid JSON: {exc}")
+                logger.warning("Decomposer JSON parse failed (attempt {}): {}", attempt + 1, exc)
+                # On retry, add a hint to the conversation
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {"role": "user", "content": "That was not valid JSON. Please respond with ONLY the JSON object, no markdown fences or explanation."}
+                )
+                continue
+
+        if last_error:
+            logger.error("Decomposer failed after retries: {}", last_error)
+            raise last_error
 
         tasks_raw: list[dict] = data.get("tasks", [])
         if not tasks_raw:
