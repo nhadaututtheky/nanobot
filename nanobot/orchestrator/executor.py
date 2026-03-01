@@ -152,13 +152,7 @@ class GraphExecutor:
             prompt = self._build_node_prompt(node)
 
             # Resolve model — use assigned_model or fall back to default.
-            # If provider doesn't support model routing (e.g. Claude CLI),
-            # always use the provider's default model.
             model = node.assigned_model or self._config.agents.defaults.model
-            provider_cls = type(self._provider).__name__
-            if provider_cls in ("ClaudeCLIProvider",):
-                if hasattr(self._provider, "get_default_model"):
-                    model = self._provider.get_default_model()
 
             # Build messages
             messages: list[dict[str, Any]] = [

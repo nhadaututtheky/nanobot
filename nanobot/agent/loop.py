@@ -136,6 +136,33 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
+    def _make_orchestrator_provider(self) -> LLMProvider:
+        """Create a LiteLLM provider for orchestrator, regardless of main provider type.
+
+        The orchestrator routes to many different models (Opus, Sonnet, Haiku,
+        GPT-4.1, etc.) so it MUST use LiteLLMProvider which supports arbitrary
+        model routing. The main agent's provider (e.g. ClaudeCLIProvider) may
+        only support a single model family.
+        """
+        from nanobot.providers.litellm_provider import LiteLLMProvider
+
+        # Already LiteLLM? Reuse it.
+        if isinstance(self.provider, LiteLLMProvider):
+            return self.provider
+
+        # Build a new LiteLLM provider from config
+        model = self._config.agents.defaults.model
+        p = self._config.get_provider(model)
+        provider_name = self._config.get_provider_name(model)
+
+        return LiteLLMProvider(
+            api_key=p.api_key if p else None,
+            api_base=self._config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            provider_name=provider_name,
+        )
+
     def _init_orchestrator(self) -> None:
         """Initialise orchestrator components if config is available and enabled."""
         if not self._config:
@@ -151,10 +178,11 @@ class AgentLoop:
         from nanobot.orchestrator.telegram_sender import TelegramOrchestratorSender
 
         try:
+            orch_provider = self._make_orchestrator_provider()
             self.orchestrator_router = ModelRouter(self._config)
             self.orchestrator_store = GraphStore(self.workspace)
             self.orchestrator_decomposer = GoalDecomposer(
-                provider=self.provider,
+                provider=orch_provider,
                 router=self.orchestrator_router,
             )
 
@@ -162,7 +190,7 @@ class AgentLoop:
             tg_sender = TelegramOrchestratorSender(self._config)
 
             self.orchestrator_executor = GraphExecutor(
-                provider=self.provider,
+                provider=orch_provider,
                 workspace=self.workspace,
                 bus=self.bus,
                 store=self.orchestrator_store,

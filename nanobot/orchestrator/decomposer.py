@@ -61,21 +61,7 @@ class GoalDecomposer:
         """Send goal to LLM, parse JSON output, build and return a TaskGraph."""
         orchestrator_model = self._router.route_orchestrator()
 
-        # Resolve model: use router's pick, but fall back to provider default
-        # if the provider doesn't support arbitrary model routing (e.g. Claude CLI).
         model_to_use = orchestrator_model.model
-        if hasattr(self._provider, "get_default_model"):
-            provider_default = self._provider.get_default_model()
-            # Claude CLI and similar subprocess providers ignore the model param —
-            # they always use their configured model. Detect by checking the provider class.
-            provider_cls = type(self._provider).__name__
-            if provider_cls in ("ClaudeCLIProvider",):
-                model_to_use = provider_default
-                logger.info(
-                    "Provider {} doesn't support model routing — using default {}",
-                    provider_cls,
-                    model_to_use,
-                )
 
         logger.info(
             "Decomposing goal with {} (tier={}, effective={})",

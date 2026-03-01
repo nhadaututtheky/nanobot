@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ChevronDown, Trash2 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -18,16 +19,21 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { rpc } from '@/ws/rpc'
 import type { SubAgentRoleConfig } from '@/types/skills'
+import type { ModelInfo } from '@/types/orchestrator'
 import {
   THINKING_STYLE_OPTIONS,
   PERSISTENCE_OPTIONS,
   RESPONSE_LENGTH_OPTIONS,
 } from './SubAgentPresets'
 
+const INHERIT_VALUE = '__inherit__'
+
 interface SubAgentRoleCardProps {
   roleId: string
   config: SubAgentRoleConfig
+  activeModel?: string
   onUpdate: (roleId: string, patch: Partial<SubAgentRoleConfig>) => void
   onDelete?: (roleId: string) => void
 }
@@ -35,11 +41,20 @@ interface SubAgentRoleCardProps {
 export function SubAgentRoleCard({
   roleId,
   config,
+  activeModel,
   onUpdate,
   onDelete,
 }: SubAgentRoleCardProps) {
   const [personaOpen, setPersonaOpen] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+
+  const { data: modelsData } = useQuery({
+    queryKey: ['orchestrator', 'models'],
+    queryFn: () => rpc.orchestrator.models(),
+    staleTime: 60_000,
+  })
+  const availableModels: ModelInfo[] = modelsData?.models ?? []
+  const mainModelShort = activeModel?.split('/').pop() ?? activeModel ?? 'default'
 
   const display = config.displayName || roleId
   const icon = config.icon || '🤖'
@@ -169,16 +184,32 @@ export function SubAgentRoleCard({
         {/* Model Override */}
         <div className="space-y-1">
           <Label className="text-xs">Model</Label>
-          <Input
-            placeholder="(inherit main)"
-            defaultValue={config.model}
-            onBlur={(e) => {
-              if (e.target.value !== config.model) {
-                onUpdate(roleId, { model: e.target.value })
-              }
-            }}
-            className="h-8 text-xs"
-          />
+          <Select
+            value={config.model || INHERIT_VALUE}
+            onValueChange={(v) => onUpdate(roleId, { model: v === INHERIT_VALUE ? '' : v })}
+          >
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={INHERIT_VALUE}>
+                <span className="text-muted-foreground">Inherit main</span>
+                <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">
+                  ({mainModelShort})
+                </span>
+              </SelectItem>
+              {availableModels.map((m) => (
+                <SelectItem key={m.model} value={m.model}>
+                  <span className="flex items-center gap-1.5">
+                    <span>{m.model.split('/').pop()}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {m.tier} · {m.provider}
+                    </span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

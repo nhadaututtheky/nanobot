@@ -63,6 +63,13 @@ export function SubAgentPanel() {
     refetchInterval: 5_000,
   })
 
+  const { data: statusData } = useQuery({
+    queryKey: ['system', 'status'],
+    queryFn: () => rpc.system.status() as Promise<{ model?: string }>,
+    staleTime: 30_000,
+  })
+  const activeModel = (statusData?.model as string) ?? ''
+
   const config: SubAgentConfig = subagentConfig ?? {
     enabled: true,
     defaultMaxIterations: 15,
@@ -251,6 +258,7 @@ export function SubAgentPanel() {
               key={id}
               roleId={id}
               config={roleCfg}
+              activeModel={activeModel}
               onUpdate={handleRoleUpdate}
               onDelete={roleCfg.builtin ? undefined : handleRoleDelete}
             />
