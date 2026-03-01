@@ -5,9 +5,12 @@ import { nanobotWS } from './client'
 // Helper — forwards to singleton client
 // ---------------------------------------------------------------------------
 
-function call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-  return nanobotWS.rpc<T>(method, params)
+function call<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {
+  return nanobotWS.rpc<T>(method, params, timeoutMs)
 }
+
+/** Extended timeout for LLM-backed operations (decompose, run). */
+const LLM_TIMEOUT = 120_000
 
 // ---------------------------------------------------------------------------
 // RPC namespace object
@@ -300,13 +303,13 @@ export const rpc = {
 
   orchestrator: {
     decompose: (params: { goal: string; context?: string; maxTasks?: number }) =>
-      call<import('@/types/orchestrator').TaskGraph>('orchestrator.decompose', params as Record<string, unknown>),
+      call<import('@/types/orchestrator').TaskGraph>('orchestrator.decompose', params as Record<string, unknown>, LLM_TIMEOUT),
 
     execute: (params: { graphId: string }) =>
       call<{ ok: boolean; graphId: string }>('orchestrator.execute', params as Record<string, unknown>),
 
     run: (params: { goal: string; context?: string; maxTasks?: number }) =>
-      call<import('@/types/orchestrator').TaskGraph>('orchestrator.run', params as Record<string, unknown>),
+      call<import('@/types/orchestrator').TaskGraph>('orchestrator.run', params as Record<string, unknown>, LLM_TIMEOUT),
 
     graphGet: (params: { graphId: string }) =>
       call<import('@/types/orchestrator').TaskGraph>('orchestrator.graph.get', params as Record<string, unknown>),

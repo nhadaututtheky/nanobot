@@ -118,6 +118,7 @@ class NanoBotWSClient {
   async rpc<T = unknown>(
     method: string,
     params: Record<string, unknown> = {},
+    timeoutMs?: number,
   ): Promise<T> {
     if (this.state !== 'connected') {
       throw new RpcError({ code: 'NOT_CONNECTED', message: 'WebSocket not connected' })
@@ -125,12 +126,13 @@ class NanoBotWSClient {
 
     const id = generateId()
     const frame: RequestFrame = { type: 'req', id, method, params }
+    const timeout = timeoutMs ?? RPC_TIMEOUT_MS
 
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new RpcError({ code: 'TIMEOUT', message: `RPC '${method}' timed out` }))
-      }, RPC_TIMEOUT_MS)
+      }, timeout)
 
       this.pending.set(id, {
         resolve: (payload) => resolve(payload as T),
