@@ -4,6 +4,8 @@ import {
   MessageSquare,
   Settings,
   Router,
+  Puzzle,
+  Network,
   Clock,
   BarChart3,
   PanelLeftClose,
@@ -18,6 +20,8 @@ const navItems = [
   { path: '/chat', label: 'Chat', icon: MessageSquare },
   { path: '/config', label: 'Config', icon: Settings },
   { path: '/providers', label: 'Providers', icon: Router },
+  { path: '/skills', label: 'Skills', icon: Puzzle },
+  { path: '/orchestrator', label: 'Orchestrator', icon: Network },
   { path: '/cron', label: 'Cron', icon: Clock },
   { path: '/analytics', label: 'Analytics', icon: BarChart3 },
 ]

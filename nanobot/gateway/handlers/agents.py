@@ -141,6 +141,27 @@ async def handle_tools_catalog(ctx: GatewayContext, conn: ClientConnection, para
     return {"tools": tools}
 
 
+async def handle_subagent_config_get(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:
+    """Return subagent config with effective roles (builtin defaults merged with user overrides)."""
+    cfg = ctx.config.agents.subagent
+    base = cfg.model_dump(by_alias=True)
+
+    # Replace raw roles with effective roles (merged builtin + user overrides)
+    effective = cfg.get_effective_roles()
+    base["roles"] = {
+        role_id: role_cfg.model_dump(by_alias=True)
+        for role_id, role_cfg in effective.items()
+    }
+    return base
+
+
+async def handle_subagent_tasks_list(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:
+    """List running and recently completed subagent tasks."""
+    if hasattr(ctx.agent, "subagent_manager") and ctx.agent.subagent_manager:
+        return ctx.agent.subagent_manager.get_tasks_info()
+    return {"running": [], "completed": [], "runningCount": 0}
+
+
 ROUTES = {
     "agents.list": handle_agents_list,
     "agent.identity.get": handle_agent_identity_get,
@@ -148,4 +169,6 @@ ROUTES = {
     "agents.files.get": handle_agents_files_get,
     "agents.files.set": handle_agents_files_set,
     "tools.catalog": handle_tools_catalog,
+    "subagent.config.get": handle_subagent_config_get,
+    "subagent.tasks.list": handle_subagent_tasks_list,
 }

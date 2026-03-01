@@ -67,10 +67,12 @@ export function SessionMeta({ sessionKey, label, thinkingLevel }: SessionMetaPro
 
   const { data: sessionsData } = useQuery({
     queryKey: ['sessions'],
+    queryFn: () => rpc.sessions.list(),
     enabled: open,
   })
 
-  const sessions = (sessionsData as SessionData[] | undefined) ?? []
+  const rawSessions = sessionsData as { sessions?: SessionData[] } | SessionData[] | undefined
+  const sessions = Array.isArray(rawSessions) ? rawSessions : (rawSessions?.sessions ?? [])
   const sessionInfo = sessions.find((s) => s.key === sessionKey)
 
   const usage = usageData as UsageData | undefined

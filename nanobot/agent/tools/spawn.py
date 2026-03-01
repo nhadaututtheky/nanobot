@@ -27,20 +27,33 @@ class SpawnTool(Tool):
     def name(self) -> str:
         return "spawn"
 
+    def _get_roles_description(self) -> str:
+        """Build dynamic description listing all available roles."""
+        effective = self._manager.subagent_config.get_effective_roles()
+        parts: list[str] = []
+        for role_id, cfg in effective.items():
+            display = cfg.display_name or role_id
+            icon = f"{cfg.icon} " if cfg.icon else ""
+            desc = cfg.description or ""
+            parts.append(f"{icon}'{role_id}' ({display}): {desc}")
+        return "\n".join(parts)
+
     @property
     def description(self) -> str:
+        roles_desc = self._get_roles_description()
         return (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
-            "The subagent will complete the task and report back when done. "
-            "Roles: 'researcher' (read-only + web + neural memory), "
-            "'coder' (file ops + exec + web), "
-            "'reviewer' (read-only + neural memory), "
-            "'general' (all tools, default)."
+            "The subagent will complete the task and report back when done.\n"
+            f"Available roles:\n{roles_desc}"
         )
 
     @property
     def parameters(self) -> dict[str, Any]:
+        # Dynamic role list from config
+        effective = self._manager.subagent_config.get_effective_roles()
+        role_ids = list(effective.keys())
+
         return {
             "type": "object",
             "properties": {
@@ -54,8 +67,8 @@ class SpawnTool(Tool):
                 },
                 "role": {
                     "type": "string",
-                    "enum": ["general", "researcher", "coder", "reviewer"],
-                    "description": "Subagent role determining available tools (default: general)",
+                    "enum": role_ids,
+                    "description": f"Subagent role determining available tools. Available: {', '.join(role_ids)} (default: general)",
                 },
                 "context": {
                     "type": "string",

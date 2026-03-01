@@ -5,6 +5,7 @@ import {
   MessageSquare,
   Settings,
   Router,
+  Puzzle,
   Clock,
   BarChart3,
   Sun,
@@ -25,6 +26,7 @@ const pages = [
   { label: 'Chat', path: '/chat', icon: MessageSquare },
   { label: 'Config', path: '/config', icon: Settings },
   { label: 'Providers', path: '/providers', icon: Router },
+  { label: 'Skills & Plugins', path: '/skills', icon: Puzzle },
   { label: 'Cron Jobs', path: '/cron', icon: Clock },
   { label: 'Analytics', path: '/analytics', icon: BarChart3 },
 ]

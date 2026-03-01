@@ -240,10 +240,142 @@ class AgentDefaults(Base):
     memory_window: int = 100
 
 
+class SubAgentRoleConfig(Base):
+    """Per-role configuration for subagents."""
+
+    # Core (existing)
+    model: str = ""  # empty = inherit from main agent
+    max_iterations: int = 0  # 0 = inherit defaults
+    temperature: float = 0.0  # 0 = inherit defaults
+    max_tokens: int = 0  # 0 = inherit defaults
+    tools: list[str] = Field(default_factory=list)  # empty = role default
+
+    # Identity
+    display_name: str = ""
+    description: str = ""
+    persona: str = ""  # Extra system prompt (personality)
+    icon: str = ""  # Emoji: "🔍", "💻"
+    strengths: list[str] = Field(default_factory=list)
+    builtin: bool = False  # True for default 4 (UI blocks deletion)
+
+    # Human-friendly presets
+    thinking_style: str = ""  # "creative" | "balanced" | "precise"
+    persistence: str = ""  # "quick" | "normal" | "thorough"
+    response_length: str = ""  # "brief" | "normal" | "detailed"
+
+    # Telegram identity (optional, for orchestrator multi-bot)
+    telegram_bot_token: str = ""  # Bot token for this role (empty = use main bot)
+
+
+BUILTIN_ROLES: dict[str, dict] = {
+    "general": {
+        "display_name": "General",
+        "icon": "🤖",
+        "builtin": True,
+        "description": "General-purpose agent with all tools",
+        "strengths": ["versatile", "all tools"],
+    },
+    "researcher": {
+        "display_name": "Researcher",
+        "icon": "🔍",
+        "builtin": True,
+        "description": "Read-only research — web search, file reading, memory",
+        "strengths": ["web research", "file analysis", "memory"],
+        "tools": ["read_file", "list_dir", "web_search", "web_fetch"],
+    },
+    "coder": {
+        "display_name": "Code Writer",
+        "icon": "💻",
+        "builtin": True,
+        "description": "Code writing and execution — files, shell, web",
+        "strengths": ["coding", "file editing", "shell"],
+        "tools": ["read_file", "write_file", "edit_file", "list_dir", "exec", "web_search", "web_fetch"],
+    },
+    "reviewer": {
+        "display_name": "Reviewer",
+        "icon": "📋",
+        "builtin": True,
+        "description": "Read-only code and content analysis",
+        "strengths": ["code review", "analysis"],
+        "tools": ["read_file", "list_dir"],
+    },
+}
+
+
+class SubAgentConfig(Base):
+    """Subagent system configuration."""
+
+    enabled: bool = True
+    default_max_iterations: int = 15
+    default_temperature: float = 0.7
+    default_max_tokens: int = 4096
+    roles: dict[str, SubAgentRoleConfig] = Field(default_factory=dict)
+
+    def get_effective_roles(self) -> dict[str, SubAgentRoleConfig]:
+        """Merge BUILTIN_ROLES defaults with user overrides + custom roles."""
+        result: dict[str, SubAgentRoleConfig] = {}
+
+        # Start with builtin defaults
+        for role_id, defaults in BUILTIN_ROLES.items():
+            base = SubAgentRoleConfig(**defaults)
+            # Merge user overrides on top
+            if role_id in self.roles:
+                override = self.roles[role_id]
+                merged = {
+                    **base.model_dump(),
+                    **{k: v for k, v in override.model_dump().items() if v},
+                }
+                # Preserve builtin flag from defaults
+                merged["builtin"] = defaults.get("builtin", False)
+                # Keep empty-ish fields from override if they were explicitly set
+                if override.tools:
+                    merged["tools"] = override.tools
+                if override.strengths:
+                    merged["strengths"] = override.strengths
+                result[role_id] = SubAgentRoleConfig(**merged)
+            else:
+                result[role_id] = base
+
+        # Add any custom roles not in builtins
+        for role_id, role_cfg in self.roles.items():
+            if role_id not in BUILTIN_ROLES:
+                result[role_id] = role_cfg
+
+        return result
+
+
+class ModelCapabilityConfig(Base):
+    """User-configurable model capability entry for orchestrator routing."""
+
+    model: str = ""  # e.g. "anthropic/claude-opus-4-5"
+    provider: str = ""  # e.g. "anthropic"
+    capabilities: list[str] = Field(default_factory=list)  # ["reasoning", "coding", ...]
+    tier: str = "mid"  # "high" | "mid" | "low"
+    cost_input: float = 0.0  # per 1K tokens
+    cost_output: float = 0.0
+    context_window: int = 128_000
+
+
+class OrchestratorConfig(Base):
+    """Task graph orchestrator configuration."""
+
+    enabled: bool = True
+    max_concurrent_graphs: int = 3
+    default_task_timeout_s: int = 300
+    max_tasks_per_graph: int = 20
+    models: list[ModelCapabilityConfig] = Field(default_factory=list)
+
+    # Telegram integration (multi-bot orchestrator)
+    telegram_group_id: str = ""  # Chat ID where sub-agents post progress
+    telegram_result_channel: str = ""  # Channel/chat ID for final summary
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    subagent: SubAgentConfig = Field(default_factory=SubAgentConfig)
+    orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)
 
 
 class ProviderConfig(Base):

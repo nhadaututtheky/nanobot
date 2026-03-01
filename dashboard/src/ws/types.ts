@@ -72,6 +72,7 @@ export type BroadcastEvent =
   | 'cron'
   | 'presence'
   | 'agent'
+  | 'orchestrator'
   | 'device.pair.requested'
   | 'device.pair.resolved'
   | 'exec.approval.requested'

@@ -13,6 +13,8 @@ const ConfigPage = lazy(() => import('@/features/config/ConfigPage').then(m => (
 const CronPage = lazy(() => import('@/features/cron/CronPage').then(m => ({ default: m.CronPage })))
 const GatewayPage = lazy(() => import('@/features/gateway/GatewayPage').then(m => ({ default: m.GatewayPage })))
 const AnalyticsPage = lazy(() => import('@/features/analytics/AnalyticsPage').then(m => ({ default: m.AnalyticsPage })))
+const SkillsPage = lazy(() => import('@/features/skills/SkillsPage').then(m => ({ default: m.SkillsPage })))
+const OrchestratorPage = lazy(() => import('@/features/orchestrator/OrchestratorPage').then(m => ({ default: m.OrchestratorPage })))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +41,8 @@ export function App() {
                 <Route path="/chat/:sessionKey" element={<ChatPage />} />
                 <Route path="/config" element={<ConfigPage />} />
                 <Route path="/providers" element={<GatewayPage />} />
+                <Route path="/skills" element={<SkillsPage />} />
+                <Route path="/orchestrator" element={<OrchestratorPage />} />
                 <Route path="/cron" element={<CronPage />} />
                 <Route path="/analytics" element={<AnalyticsPage />} />
               </Routes>

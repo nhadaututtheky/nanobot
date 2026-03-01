@@ -45,33 +45,33 @@
   --font-heading: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
 }
 
-/* ===== LIGHT MODE (SaaS Dashboard) ===== */
+/* ===== LIGHT MODE (Warm Cream — ClawHub-inspired) ===== */
 :root {
   --radius: 0.5rem;
-  --background: #ffffff;
-  --foreground: #0f172a;
-  --card: #f8fafc;
-  --card-foreground: #0f172a;
+  --background: #f8f2ed;
+  --foreground: #2a1f19;
+  --card: #fdf7f2;
+  --card-foreground: #2a1f19;
   --popover: #ffffff;
-  --popover-foreground: #0f172a;
-  --primary: #4f46e5;
+  --popover-foreground: #2a1f19;
+  --primary: #e65c46;
   --primary-foreground: #ffffff;
-  --secondary: #f1f5f9;
-  --secondary-foreground: #475569;
-  --muted: #f1f5f9;
-  --muted-foreground: #94a3b8;
-  --accent: #4f46e5;
+  --secondary: #f0e8e2;
+  --secondary-foreground: #6b5549;
+  --muted: #f0e8e2;
+  --muted-foreground: #8b7268;
+  --accent: #e65c46;
   --accent-foreground: #ffffff;
-  --destructive: #ef4444;
-  --border: #e2e8f0;
-  --input: #f1f5f9;
-  --ring: #4f46e5;
+  --destructive: #dc2626;
+  --border: #dbd4cf;
+  --input: #f0e8e2;
+  --ring: #e65c46;
   --success: #10b981;
   --warning: #f59e0b;
   --info: #3b82f6;
 
   /* Chart */
-  --chart-1: #4f46e5;
+  --chart-1: #e65c46;
   --chart-2: #10b981;
   --chart-3: #ef4444;
   --chart-4: #f59e0b;

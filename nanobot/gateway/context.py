@@ -32,6 +32,10 @@ class GatewayContext:
     bus: MessageBus
     broadcaster: Broadcaster
 
+    # Orchestrator components (populated at startup if enabled)
+    orchestrator: dict[str, Any] | None = None
+    """Contains store, executor, decomposer, router when orchestrator is active."""
+
     # Mutable runtime state
     active_runs: dict[str, list[Any]] = field(default_factory=dict)
     """Map session_key → list of asyncio.Task for active chat runs."""

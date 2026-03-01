@@ -185,6 +185,12 @@ export const rpc = {
 
     toolsCatalog: () =>
       call('tools.catalog'),
+
+    subagentConfigGet: () =>
+      call<import('@/types/skills').SubAgentConfig>('subagent.config.get'),
+
+    subagentTasksList: () =>
+      call<import('@/types/skills').SubAgentTasksInfo>('subagent.tasks.list'),
   },
 
   // -------------------------------------------------------------------------
@@ -193,13 +199,25 @@ export const rpc = {
 
   skills: {
     status: () =>
-      call('skills.status'),
+      call<{ skills: import('@/types/skills').SkillInfo[] }>('skills.status'),
 
-    update: (params: { skillId: string; patch: Record<string, unknown> }) =>
+    update: (params: { skillKey: string; enabled?: boolean; apiKey?: string }) =>
       call('skills.update', params as Record<string, unknown>),
 
-    install: (params: { source: string; name?: string }) =>
+    install: (params: { name: string; timeoutMs?: number }) =>
       call('skills.install', params as Record<string, unknown>),
+
+    search: (params: { query: string; limit?: number }) =>
+      call<{ results: import('@/types/skills').MarketplaceSkill[] }>('skills.search', params as Record<string, unknown>),
+
+    marketplaceInstall: (params: { slug: string }) =>
+      call<{ ok: boolean; name: string }>('skills.marketplace-install', params as Record<string, unknown>),
+
+    uninstall: (params: { name: string }) =>
+      call<{ ok: boolean }>('skills.uninstall', params as Record<string, unknown>),
+
+    read: (params: { name: string }) =>
+      call<{ content: string }>('skills.read', params as Record<string, unknown>),
   },
 
   // -------------------------------------------------------------------------
@@ -274,5 +292,38 @@ export const rpc = {
 
     stop: () =>
       call<{ ok: boolean; wasRunning: boolean; pid?: number }>('ai-gateway.stop'),
+  },
+
+  // -------------------------------------------------------------------------
+  // Orchestrator
+  // -------------------------------------------------------------------------
+
+  orchestrator: {
+    decompose: (params: { goal: string; context?: string; maxTasks?: number }) =>
+      call<import('@/types/orchestrator').TaskGraph>('orchestrator.decompose', params as Record<string, unknown>),
+
+    execute: (params: { graphId: string }) =>
+      call<{ ok: boolean; graphId: string }>('orchestrator.execute', params as Record<string, unknown>),
+
+    run: (params: { goal: string; context?: string; maxTasks?: number }) =>
+      call<import('@/types/orchestrator').TaskGraph>('orchestrator.run', params as Record<string, unknown>),
+
+    graphGet: (params: { graphId: string }) =>
+      call<import('@/types/orchestrator').TaskGraph>('orchestrator.graph.get', params as Record<string, unknown>),
+
+    graphList: (params: { limit?: number } = {}) =>
+      call<{ graphs: import('@/types/orchestrator').GraphSummary[] }>('orchestrator.graph.list', params as Record<string, unknown>),
+
+    graphCancel: (params: { graphId: string }) =>
+      call<{ ok: boolean; graphId: string }>('orchestrator.graph.cancel', params as Record<string, unknown>),
+
+    graphDelete: (params: { graphId: string }) =>
+      call<{ ok: boolean }>('orchestrator.graph.delete', params as Record<string, unknown>),
+
+    graphRetry: (params: { graphId: string }) =>
+      call<{ ok: boolean; graphId: string }>('orchestrator.graph.retry', params as Record<string, unknown>),
+
+    models: () =>
+      call<{ models: import('@/types/orchestrator').ModelInfo[] }>('orchestrator.models'),
   },
 } as const
