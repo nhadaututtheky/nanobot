@@ -125,7 +125,7 @@ export function ChatPanel({ sessionKey }: ChatPanelProps) {
   const streamContent = activeRunId ? getStreamContent(activeRunId) : ''
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-2">
@@ -136,7 +136,7 @@ export function ChatPanel({ sessionKey }: ChatPanelProps) {
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {isLoading ? (
           <MessageSkeleton />
         ) : messages.length === 0 && !isStreaming ? (

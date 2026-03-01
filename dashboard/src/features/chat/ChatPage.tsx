@@ -22,26 +22,24 @@ export function ChatPage() {
 
   return (
     <ErrorBoundary>
-      {/* Full-height split layout — no PageHeader to maximize vertical space */}
-      <div className="flex h-[calc(100vh-4rem)] overflow-hidden rounded-xl border">
-        {/* Session list — fixed 280px on desktop, full width stacked on mobile */}
-        <div className="hidden w-[280px] shrink-0 md:flex md:flex-col">
+      {/* Full-height split layout — h-[calc] minus TopBar(3rem)+padding(2rem), overflow-hidden to constrain children */}
+      <div className="flex h-[calc(100vh-5rem)] overflow-hidden rounded-xl border border-border">
+        {/* Session list — fixed 280px on desktop, min-h-0 lets flex child shrink below content */}
+        <div className="hidden w-[280px] shrink-0 md:flex md:flex-col min-h-0 overflow-hidden">
           <SessionList />
         </div>
 
         {/* Mobile: session list above, panel below */}
-        <div className="flex flex-1 flex-col md:hidden">
+        <div className="flex flex-1 flex-col md:hidden min-h-0 overflow-hidden">
           {resolvedKey ? (
             <ChatPanel sessionKey={resolvedKey} />
           ) : (
-            <div className="flex flex-col">
-              <SessionList />
-            </div>
+            <SessionList />
           )}
         </div>
 
-        {/* Desktop: chat panel */}
-        <div className="hidden flex-1 flex-col md:flex">
+        {/* Desktop: chat panel — min-h-0 lets flex child shrink so ScrollArea works */}
+        <div className="hidden flex-1 flex-col md:flex min-h-0 overflow-hidden">
           <ChatPanel sessionKey={resolvedKey} />
         </div>
       </div>
