@@ -41,6 +41,27 @@ class LLMProvider(ABC):
         self.api_base = api_base
 
     @staticmethod
+    def _normalize_context_role(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Convert 'context' role to 'user' with a prefix for API-based providers.
+
+        Observed group messages are stored with role='context' to distinguish
+        them from real user turns. LLM APIs only accept standard roles
+        (system/user/assistant/tool), so we convert them here with a clear
+        label so the LLM treats them as background info, not direct queries.
+        """
+        result: list[dict[str, Any]] = []
+        for msg in messages:
+            if msg.get("role") == "context":
+                converted = dict(msg)
+                converted["role"] = "user"
+                content = converted.get("content", "")
+                converted["content"] = f"[Group Chat Context — DO NOT reply to this, it's background info]\n{content}"
+                result.append(converted)
+            else:
+                result.append(msg)
+        return result
+
+    @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Replace empty text content that causes provider 400 errors.
 

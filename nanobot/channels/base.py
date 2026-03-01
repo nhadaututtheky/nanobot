@@ -124,7 +124,28 @@ class BaseChannel(ABC):
         )
         
         await self.bus.publish_inbound(msg)
-    
+
+    async def _observe_message(
+        self,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a message in session history without triggering the agent.
+
+        Used for group messages not addressed to the bot — the bot gains
+        conversational context but does not respond.
+        """
+        msg = InboundMessage(
+            channel=self.name,
+            sender_id=str(sender_id),
+            chat_id=str(chat_id),
+            content=content,
+            metadata={**(metadata or {}), "_observe_only": True},
+        )
+        await self.bus.publish_inbound(msg)
+
     @property
     def is_running(self) -> bool:
         """Check if the channel is running."""

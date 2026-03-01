@@ -1,11 +1,13 @@
-import { WifiOff, RefreshCw } from 'lucide-react'
+import { useState } from 'react'
+import { WifiOff, RefreshCw, X } from 'lucide-react'
 import { useConnectionStore } from '@/stores/useConnectionStore'
 import { nanobotWS } from '@/ws/client'
 
 export function ConnectionBanner() {
   const state = useConnectionStore((s) => s.state)
+  const [dismissed, setDismissed] = useState(false)
 
-  if (state === 'connected') return null
+  if (state === 'connected' || dismissed) return null
 
   const isReconnecting = state === 'connecting' || state === 'challenging' || state === 'authenticating'
 
@@ -28,6 +30,13 @@ export function ConnectionBanner() {
           </button>
         </>
       )}
+      <button
+        onClick={() => setDismissed(true)}
+        className="ml-2 rounded p-0.5 hover:bg-warning/20 transition-colors"
+        aria-label="Dismiss"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
     </div>
   )
 }

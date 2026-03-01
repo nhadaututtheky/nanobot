@@ -1,8 +1,16 @@
 export interface AuthFile {
   name: string
+  id: string
   provider: string
-  status: 'active' | 'expired' | 'unknown'
+  type: string
+  status: 'active' | 'expired' | 'disabled' | 'unknown'
+  email?: string
+  account?: string
+  label?: string
   source?: string
+  disabled?: boolean
+  unavailable?: boolean
+  runtime_only?: boolean
   metadata?: Record<string, unknown>
 }
 
@@ -27,6 +35,7 @@ export interface ProviderAuthState {
   meta: ProviderMeta
   connected: boolean
   authFile?: AuthFile
+  connectedCount?: number
 }
 
 export type OAuthFlowState =

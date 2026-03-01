@@ -211,6 +211,10 @@ class ClaudeCLIProvider(LLMProvider):
 
             if role == "system":
                 system_parts.append(content)
+            elif role == "context":
+                # Observed group messages — background context, NOT a user turn.
+                # Formatted distinctly so the LLM doesn't try to "reply" to them.
+                conversation_parts.append(f"[Group Chat Context]\n{content}")
             elif role == "user":
                 conversation_parts.append(f"[User]\n{content}")
             elif role == "assistant":
@@ -274,8 +278,27 @@ class ClaudeCLIProvider(LLMProvider):
 
     VALID_PERMISSION_MODES = {"bypassPermissions", "default", "acceptEdits", "plan"}
 
+    # Short override appended to Claude Code's own system prompt via CLI flag.
+    # Has the highest authority — it's part of the real system prompt.
+    _APPEND_SYSTEM = (
+        "You are running inside NanoBot, a custom agent framework. "
+        "NanoBot manages your tools via a tool_call protocol injected in the "
+        "user message. ALL tools listed there are REAL and AVAILABLE — "
+        "NanoBot executes them when you emit ```tool_call blocks. "
+        "NEVER claim any tool is unavailable. Just call them."
+    )
+
     def _build_cli_args(self, cli_path: str, model: str) -> list[str]:
-        """Build subprocess args for claude CLI."""
+        """Build subprocess args for claude CLI.
+
+        Key flags:
+        - --tools "": Disable ALL Claude Code built-in tools so the LLM only
+          sees NanoBot's tool_call protocol. Without this, the LLM sees Claude
+          Code's own tools (Read, Write, Bash...) and ignores our injected ones.
+        - --disable-slash-commands: Prevent slash command processing.
+        - --no-session-persistence: Don't save CLI sessions to disk.
+        - --append-system-prompt: Short identity override with system authority.
+        """
         base: list[str] = []
         if sys.platform == "win32" and cli_path.endswith(".js"):
             node = shutil.which("node") or shutil.which("node.exe")
@@ -293,6 +316,10 @@ class ClaudeCLIProvider(LLMProvider):
             "--print",
             "--model", model,
             "--permission-mode", self.permission_mode,
+            "--no-session-persistence",
+            "--disable-slash-commands",
+            "--tools", "",
+            "--append-system-prompt", self._APPEND_SYSTEM,
         ]
 
     async def _run_cli(
@@ -304,6 +331,9 @@ class ClaudeCLIProvider(LLMProvider):
         Pipes prompt via stdin using create_subprocess_exec (not shell)
         to prevent command injection. Kills subprocess on cancellation.
         """
+        # Full system prompt + user prompt go through stdin.
+        # The short _APPEND_SYSTEM override is passed via --append-system-prompt
+        # flag so it has real system-level authority inside Claude Code CLI.
         if system_prompt:
             full_prompt = f"<system>\n{system_prompt}\n</system>\n\n{user_prompt}"
         else:

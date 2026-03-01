@@ -125,11 +125,49 @@ class TelegramChannel(BaseChannel):
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
         self._app: Application | None = None
+        self._bot_username: str = ""  # e.g. "reversedev_bot" — set at startup
+        self._bot_id: int = 0
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
-    
+
+    def _is_addressed(self, message) -> bool:
+        """Check if a group message is addressed to this bot.
+
+        Returns True for:
+        - Private chats (always addressed)
+        - Replies to the bot's own messages
+        - @mention of the bot's username
+        - Bot's name mentioned (first word match, case-insensitive)
+        """
+        if message.chat.type == "private":
+            return True
+
+        # Reply to bot's message
+        if message.reply_to_message and message.reply_to_message.from_user:
+            if message.reply_to_message.from_user.id == self._bot_id:
+                return True
+
+        text = (message.text or message.caption or "").lower()
+
+        # @mention
+        if self._bot_username and f"@{self._bot_username}" in text:
+            return True
+
+        # Name mention — check for common bot names from SOUL.md
+        bot_names = {"thor"}
+        if self._bot_username:
+            # Also match the username without "bot" suffix
+            clean = self._bot_username.removesuffix("bot").removesuffix("_")
+            if clean:
+                bot_names.add(clean)
+        for name in bot_names:
+            if name in text.split():
+                return True
+
+        return False
+
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
         if not self.config.token:
@@ -168,6 +206,8 @@ class TelegramChannel(BaseChannel):
         
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
+        self._bot_username = (bot_info.username or "").lower()
+        self._bot_id = bot_info.id
         logger.info("Telegram bot @{} connected", bot_info.username)
         
         try:
@@ -421,8 +461,10 @@ class TelegramChannel(BaseChannel):
             content = f"[{sender_name}]: {content}"
 
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
-        
+
         str_chat_id = str(chat_id)
+        is_group = message.chat.type != "private"
+        addressed = self._is_addressed(message)
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):
@@ -431,37 +473,49 @@ class TelegramChannel(BaseChannel):
                 self._media_group_buffers[key] = {
                     "sender_id": sender_id, "chat_id": str_chat_id,
                     "contents": [], "media": [],
+                    "addressed": addressed,
                     "metadata": {
                         "message_id": message.message_id, "user_id": user.id,
                         "username": user.username, "first_name": user.first_name,
-                        "is_group": message.chat.type != "private",
+                        "is_group": is_group,
                     },
                 }
-                self._start_typing(str_chat_id)
+                if addressed:
+                    self._start_typing(str_chat_id)
             buf = self._media_group_buffers[key]
+            if addressed:
+                buf["addressed"] = True
             if content and content != "[empty message]":
                 buf["contents"].append(content)
             buf["media"].extend(media_paths)
             if key not in self._media_group_tasks:
                 self._media_group_tasks[key] = asyncio.create_task(self._flush_media_group(key))
             return
-        
-        # Start typing indicator before processing
+
+        metadata = {
+            "message_id": message.message_id,
+            "user_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "is_group": is_group,
+        }
+
+        # Group messages not addressed to bot: observe only (save context, don't respond)
+        if is_group and not addressed:
+            await self._observe_message(
+                sender_id=sender_id, chat_id=str_chat_id,
+                content=content, metadata=metadata,
+            )
+            return
+
+        # Addressed message — full processing
         self._start_typing(str_chat_id)
-        
-        # Forward to the message bus
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str_chat_id,
             content=content,
             media=media_paths,
-            metadata={
-                "message_id": message.message_id,
-                "user_id": user.id,
-                "username": user.username,
-                "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
-            }
+            metadata=metadata,
         )
     
     async def _flush_media_group(self, key: str) -> None:
@@ -471,6 +525,12 @@ class TelegramChannel(BaseChannel):
             if not (buf := self._media_group_buffers.pop(key, None)):
                 return
             content = "\n".join(buf["contents"]) or "[empty message]"
+            if not buf.get("addressed") and buf.get("metadata", {}).get("is_group"):
+                await self._observe_message(
+                    sender_id=buf["sender_id"], chat_id=buf["chat_id"],
+                    content=content, metadata=buf["metadata"],
+                )
+                return
             await self._handle_message(
                 sender_id=buf["sender_id"], chat_id=buf["chat_id"],
                 content=content, media=list(dict.fromkeys(buf["media"])),

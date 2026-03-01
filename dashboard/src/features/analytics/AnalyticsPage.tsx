@@ -16,12 +16,13 @@ import { formatCompact } from '@/lib/utils'
 
 interface CostData {
   totalCost: number
-  totalTokens: number
-  currency: string
+  totalTokens?: number
+  currency?: string
 }
 
 interface SessionItem {
-  sessionKey: string
+  key?: string
+  sessionKey?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -41,11 +42,14 @@ export function AnalyticsPage() {
   const { data: sessions, isLoading: sessionsLoading } = useQuery({
     queryKey: ['sessions-list'],
     queryFn: () => rpc.sessions.list(),
-    select: (d) => d as SessionItem[],
+    select: (d) => {
+      const raw = d as { sessions?: SessionItem[] } | SessionItem[]
+      return Array.isArray(raw) ? raw : (raw.sessions ?? [])
+    },
     refetchInterval: 60_000,
   })
 
-  const sessionKeys = sessions?.map((s) => s.sessionKey) ?? []
+  const sessionKeys = sessions?.map((s) => s.sessionKey ?? s.key ?? '') .filter(Boolean) ?? []
 
   const handleSessionSelect = useCallback((key: string) => {
     setSelectedSession(key)

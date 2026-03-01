@@ -24,33 +24,39 @@ export function QuickStats() {
   })
 
   const statusData = status as Record<string, unknown> | undefined
-  const presenceData = presence as Array<unknown> | undefined
+  const presenceRaw = presence as { clients?: unknown[] } | unknown[] | undefined
+  const presenceList = Array.isArray(presenceRaw) ? presenceRaw : (presenceRaw?.clients ?? [])
   const costData = cost as Record<string, unknown> | undefined
+
+  // Server status: { agent, channels, cron, heartbeat, gateway }
+  const cronObj = statusData?.['cron'] as Record<string, unknown> | undefined
+  const channelsObj = statusData?.['channels'] as Record<string, boolean> | undefined
+  const activeChannels = channelsObj ? Object.values(channelsObj).filter(Boolean).length : 0
 
   return (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
       <StatusCard
         icon={<MessageSquare className="h-5 w-5" />}
-        label="Sessions"
-        value={String(statusData?.['activeSessions'] ?? '—')}
+        label="Channels"
+        value={String(activeChannels || '—')}
         loading={statusLoading}
       />
       <StatusCard
         icon={<Users className="h-5 w-5" />}
         label="Clients"
-        value={String(presenceData?.length ?? '—')}
+        value={String(presenceList.length || '—')}
         loading={presenceLoading}
       />
       <StatusCard
         icon={<Clock className="h-5 w-5" />}
         label="Cron Jobs"
-        value={String(statusData?.['cronJobs'] ?? '—')}
+        value={String(cronObj?.['jobs'] ?? '—')}
         loading={statusLoading}
       />
       <StatusCard
         icon={<Coins className="h-5 w-5" />}
-        label="Tokens Today"
-        value={costData?.['totalTokens'] ? formatCompact(costData['totalTokens'] as number) : '—'}
+        label="Cost Today"
+        value={costData?.['totalCost'] ? `$${formatCompact(costData['totalCost'] as number)}` : '—'}
         loading={costLoading}
       />
     </div>

@@ -37,7 +37,10 @@ export function CronRunHistory({ jobId }: CronRunHistoryProps) {
     queryKey: ['cron-runs', jobId],
     queryFn: () => rpc.cron.runs({ jobId, limit: 20 }),
     enabled: open,
-    select: (d) => d as CronRun[],
+    select: (d) => {
+      const raw = d as { runs?: CronRun[] } | CronRun[]
+      return Array.isArray(raw) ? raw : (raw.runs ?? [])
+    },
   })
 
   return (

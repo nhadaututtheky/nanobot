@@ -20,8 +20,8 @@ export const useConnectionStore = create<ConnectionStore>((set) => ({
   setConnected: (meta) =>
     set({
       state: 'connected',
-      connId: meta.connId,
-      features: meta.features ?? [],
+      connId: meta.server?.connId ?? meta.connId ?? null,
+      features: meta.features?.methods ?? [],
     }),
 
   setState: (state) =>

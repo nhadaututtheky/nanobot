@@ -1,0 +1,22 @@
+# Lefthook config for Python projects
+# Install: https://github.com/evilmartians/lefthook
+# Copy to project root as lefthook.yml
+
+pre-commit:
+  parallel: true
+  commands:
+    ruff-check:
+      glob: "*.py"
+      run: ruff check --fix {staged_files}
+      stage_fixed: true
+    ruff-format:
+      glob: "*.py"
+      run: ruff format {staged_files}
+      stage_fixed: true
+
+pre-push:
+  commands:
+    typecheck:
+      run: mypy src/ --ignore-missing-imports
+    test:
+      run: pytest tests/ -x -q --timeout=60

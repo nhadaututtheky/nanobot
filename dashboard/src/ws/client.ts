@@ -72,6 +72,7 @@ class NanoBotWSClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private shouldReconnect = false
   private authToken = ''
+  private connectReqId: string | null = null
 
   // Public meta from hello-ok
   connId: string | null = null
@@ -213,16 +214,6 @@ class NanoBotWSClient {
       return
     }
 
-    // Intercept hello-ok to complete handshake
-    if (frame.event === 'hello-ok' && this.state === 'authenticating') {
-      const meta = frame.payload as HelloPayload
-      this.connId = meta.connId
-      this.features = meta.features ?? []
-      this.reconnectAttempt = 0
-      this._setState('connected', meta)
-      return
-    }
-
     // Dispatch to registered handlers
     const handlers = this.eventHandlers.get(frame.event)
     if (handlers) {
@@ -233,6 +224,24 @@ class NanoBotWSClient {
   }
 
   private _handleResponse(frame: ResponseFrame): void {
+    // Intercept connect response (hello-ok) to complete handshake
+    if (frame.id === this.connectReqId && this.state === 'authenticating') {
+      this.connectReqId = null
+      if (frame.ok) {
+        const meta = frame.payload as HelloPayload
+        this.connId = meta.server?.connId ?? null
+        this.features = meta.features?.methods ?? []
+        this.reconnectAttempt = 0
+        this._setState('connected', meta)
+      } else {
+        const errInfo = frame.error ?? { code: 'UNKNOWN', message: 'Unknown error' }
+        console.error('[ws] connect rejected:', errInfo.code, errInfo.message)
+        this._closeSocket(1000, 'auth rejected')
+        this._setState('failed')
+      }
+      return
+    }
+
     const pending = this.pending.get(frame.id)
     if (!pending) return
 
@@ -283,9 +292,12 @@ class NanoBotWSClient {
       device: { id: getOrCreateDeviceId() },
     }
 
+    const id = generateId()
+    this.connectReqId = id
+
     const frame: RequestFrame = {
       type: 'req',
-      id: generateId(),
+      id,
       method: 'connect',
       params: params as unknown as Record<string, unknown>,
     }

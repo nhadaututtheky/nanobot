@@ -36,8 +36,9 @@ export function SessionUsageTable({ onSessionSelect }: SessionUsageTableProps) {
   const { data, isLoading } = useQuery({
     queryKey: ['sessions-usage-all'],
     queryFn: async () => {
-      const sessions = await rpc.sessions.list()
-      const list = sessions as Array<{ sessionKey: string }>
+      const sessionsRaw = await rpc.sessions.list() as { sessions?: Array<{ sessionKey: string }> } | Array<{ sessionKey: string }>
+      const rawList = Array.isArray(sessionsRaw) ? sessionsRaw : (sessionsRaw.sessions ?? [])
+      const list = rawList.map((s) => ({ sessionKey: (s as Record<string, string>).sessionKey ?? (s as Record<string, string>).key ?? '' }))
       const usages = await Promise.all(
         list.map((s) =>
           rpc.sessions.usage({ sessionKey: s.sessionKey }).catch(() => null),

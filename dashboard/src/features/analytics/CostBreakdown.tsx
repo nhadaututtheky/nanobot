@@ -43,7 +43,23 @@ export function CostBreakdown() {
   const { data, isLoading } = useQuery({
     queryKey: ['usage-cost-detail'],
     queryFn: () => rpc.system.usageCost(),
-    select: (d) => d as CostData,
+    select: (d) => {
+      const raw = d as Record<string, unknown>
+      const byModelRaw = raw.byModel as Record<string, number> | ModelCost[] | undefined
+      const byModel: ModelCost[] = Array.isArray(byModelRaw)
+        ? byModelRaw
+        : Object.entries(byModelRaw ?? {}).map(([model, cost]) => ({
+            model,
+            tokens: 0,
+            cost: typeof cost === 'number' ? cost : 0,
+          }))
+      return {
+        totalCost: (raw.totalCost as number) ?? 0,
+        totalTokens: (raw.totalTokens as number) ?? 0,
+        currency: (raw.currency as string) ?? 'USD',
+        byModel,
+      } satisfies CostData
+    },
     refetchInterval: 60_000,
   })
 

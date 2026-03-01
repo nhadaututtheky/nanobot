@@ -65,7 +65,8 @@ export function ChatPanel({ sessionKey }: ChatPanelProps) {
     enabled: Boolean(sessionKey),
   })
 
-  const messages = (data as HistoryMessage[] | undefined) ?? []
+  const raw = data as { messages?: HistoryMessage[] } | HistoryMessage[] | undefined
+  const messages = Array.isArray(raw) ? raw : (raw?.messages ?? [])
 
   // Auto-scroll to bottom on new messages or streaming
   useEffect(() => {

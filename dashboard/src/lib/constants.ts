@@ -35,6 +35,7 @@ export const NAV_ITEMS = [
 
 // AI Gateway (CLIProxyAPI-compatible management API)
 export const GATEWAY_MGMT_URL_KEY = 'gateway_mgmt_url'
+export const GATEWAY_MGMT_KEY_KEY = 'gateway_mgmt_key'
 export const GATEWAY_DEFAULT_MGMT = '/ai-gateway'
 export const GATEWAY_TIMEOUT_MS = 8000
 export const GATEWAY_POLL_INTERVAL_MS = 2000

@@ -54,7 +54,7 @@ export function SystemHealthCard() {
             <Clock className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-muted-foreground">Uptime</span>
             <span className="ml-auto font-mono-bold text-xs">
-              {health?.['uptimeMs'] ? formatDuration(health['uptimeMs'] as number) : '—'}
+              {health?.['uptime'] ? formatDuration((health['uptime'] as number) * 1000) : '—'}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -65,7 +65,7 @@ export function SystemHealthCard() {
           <div className="flex items-center gap-2">
             <Server className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-muted-foreground">Python</span>
-            <span className="ml-auto font-mono text-xs">{String(health?.['pythonVersion'] ?? '—')}</span>
+            <span className="ml-auto font-mono text-xs">{String(health?.['python'] ?? '—')}</span>
           </div>
         </div>
       </CardContent>

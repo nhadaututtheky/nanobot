@@ -197,7 +197,7 @@ class LiteLLMProvider(LLMProvider):
         
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "messages": self._sanitize_messages(self._sanitize_empty_content(self._normalize_context_role(messages))),
             "max_tokens": max_tokens,
             "temperature": temperature,
         }

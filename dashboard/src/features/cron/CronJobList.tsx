@@ -45,7 +45,10 @@ export function CronJobList() {
   const { data, isLoading } = useQuery({
     queryKey: ['cron-list'],
     queryFn: () => rpc.cron.list(),
-    select: (d) => d as CronJob[],
+    select: (d) => {
+      const raw = d as { jobs?: CronJob[] } | CronJob[]
+      return Array.isArray(raw) ? raw : (raw.jobs ?? [])
+    },
     refetchInterval: 30_000,
   })
 

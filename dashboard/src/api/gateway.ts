@@ -1,5 +1,6 @@
 import {
   GATEWAY_MGMT_URL_KEY,
+  GATEWAY_MGMT_KEY_KEY,
   GATEWAY_DEFAULT_MGMT,
   GATEWAY_TIMEOUT_MS,
 } from '@/lib/constants'
@@ -9,8 +10,14 @@ function getBase(): string {
   return localStorage.getItem(GATEWAY_MGMT_URL_KEY) ?? GATEWAY_DEFAULT_MGMT
 }
 
+function getHeaders(): HeadersInit {
+  const key = localStorage.getItem(GATEWAY_MGMT_KEY_KEY)
+  return key ? { 'X-Management-Key': key } : {}
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${getBase()}${path}`, {
+    headers: getHeaders(),
     signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`Gateway ${path}: ${res.status} ${res.statusText}`)
@@ -20,18 +27,25 @@ async function get<T>(path: string): Promise<T> {
 async function del(path: string): Promise<void> {
   const res = await fetch(`${getBase()}${path}`, {
     method: 'DELETE',
+    headers: getHeaders(),
     signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`Gateway DELETE ${path}: ${res.status} ${res.statusText}`)
 }
 
 export const gatewayApi = {
-  // Health check — just ping the base URL
+  // Health check — ping /auth-files to confirm management API is reachable + key valid
   async health(): Promise<GatewayHealthResult> {
     const start = performance.now()
     try {
-      const res = await fetch(getBase(), { signal: AbortSignal.timeout(5000) })
+      const res = await fetch(`${getBase()}/auth-files`, {
+        headers: getHeaders(),
+        signal: AbortSignal.timeout(5000),
+      })
       const latencyMs = Math.round(performance.now() - start)
+      if (res.status === 401) {
+        return { reachable: false, latencyMs, error: 'Invalid management key' }
+      }
       return { reachable: res.ok, latencyMs }
     } catch (err) {
       return {
@@ -59,7 +73,10 @@ export const gatewayApi = {
     ),
 
   // Auth file management
-  getAuthFiles: () => get<AuthFile[]>('/auth-files'),
+  getAuthFiles: async () => {
+    const raw = await get<{ files?: AuthFile[] } | AuthFile[]>('/auth-files')
+    return Array.isArray(raw) ? raw : (raw.files ?? [])
+  },
   deleteAuthFile: (name: string) => del(`/auth-files?name=${encodeURIComponent(name)}`),
 
   // Usage stats

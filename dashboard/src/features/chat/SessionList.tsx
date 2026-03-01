@@ -139,7 +139,8 @@ export function SessionList() {
     void queryClient.invalidateQueries({ queryKey: ['sessions'] })
   }, [queryClient]))
 
-  const sessions = (data as Session[] | undefined) ?? []
+  const raw = data as { sessions?: Session[] } | Session[] | undefined
+  const sessions = Array.isArray(raw) ? raw : (raw?.sessions ?? [])
 
   const filtered = search
     ? sessions.filter(

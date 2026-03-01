@@ -91,6 +91,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            mcp_servers=mcp_servers,
         )
 
         self._running = False
@@ -228,11 +229,11 @@ class AgentLoop:
                         messages, tool_call.id, tool_call.name, result
                     )
             else:
-                # Suppress error responses (timeout, CLI errors) — don't send to channel
+                # Error responses (timeout, CLI crash) — log and surface to user
                 if response.finish_reason == "error":
-                    logger.warning("LLM returned error response, suppressing: %s",
-                                   (response.content or "")[:200])
-                    final_content = None
+                    error_detail = (response.content or "unknown error")[:200]
+                    logger.warning("LLM returned error response: {}", error_detail)
+                    final_content = None  # Suppress raw error; fallback assigned downstream
                     break
 
                 clean = self._strip_think(response.content)
@@ -261,6 +262,11 @@ class AgentLoop:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
+                continue
+
+            # Observe-only messages: save to session history for context, skip agent
+            if msg.metadata.get("_observe_only"):
+                self._observe(msg)
                 continue
 
             if msg.content.strip().lower() == "/stop":
@@ -318,6 +324,21 @@ class AgentLoop:
             except (RuntimeError, BaseExceptionGroup):
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
+
+    def _observe(self, msg: InboundMessage) -> None:
+        """Save an observed message to session history without agent processing.
+
+        This gives the bot conversational context for group chats where it
+        only responds when directly addressed.
+
+        Messages are stored with role "context" (not "user") so the LLM
+        treats them as background information rather than conversation turns
+        it needs to respond to.
+        """
+        session = self.sessions.get_or_create(msg.session_key)
+        session.add_message("context", msg.content)
+        self.sessions.save(session)
+        logger.debug("Observed message in {}: {}...", msg.session_key, msg.content[:60])
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -438,7 +459,12 @@ class AgentLoop:
         )
 
         if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+            # Don't send a generic fallback on channels — it's noise.
+            # CLI gets feedback; channels stay silent (agent will retry on next user message).
+            if msg.channel == "cli":
+                final_content = "LLM did not return a response. This may be a temporary issue — try again."
+            else:
+                return None
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)

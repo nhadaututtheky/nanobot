@@ -55,15 +55,15 @@ export function ProviderCard({
     oauthFlow.provider === state.provider
 
   return (
-    <Card className="relative overflow-hidden">
-      <CardContent className="flex items-start gap-3 p-4">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/50 text-muted-foreground">
+    <Card className="relative overflow-hidden hover:border-primary/30 transition-colors">
+      <CardContent className="flex items-start gap-4 p-5">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted/50 text-muted-foreground">
           {PROVIDER_ICONS[state.provider]}
         </div>
 
-        <div className="flex-1 min-w-0 space-y-1.5">
+        <div className="flex-1 min-w-0 space-y-2">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-sm truncate">{state.meta.label}</span>
+            <span className="font-semibold truncate">{state.meta.label}</span>
             <Badge variant="outline" className={`text-[10px] ${TIER_STYLES[state.meta.tier] ?? ''}`}>
               {state.meta.tier}
             </Badge>
@@ -72,15 +72,20 @@ export function ProviderCard({
             </Badge>
           </div>
 
-          <p className="text-xs text-muted-foreground line-clamp-1">
+          <p className="text-sm text-muted-foreground line-clamp-1">
             {state.meta.description}
           </p>
 
-          <div className="flex items-center gap-2 pt-1">
+          <div className="flex items-center gap-2 pt-0.5">
             {state.connected ? (
               <>
                 <StatusDot status="online" />
-                <span className="text-xs text-success">Connected</span>
+                <span className="text-xs text-success truncate">
+                  {state.authFile?.email ?? state.authFile?.label ?? 'Connected'}
+                  {(state.connectedCount ?? 0) > 1 && (
+                    <span className="text-muted-foreground ml-1">+{(state.connectedCount ?? 1) - 1}</span>
+                  )}
+                </span>
                 <Button
                   variant="ghost"
                   size="sm"

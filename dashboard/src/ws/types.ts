@@ -87,11 +87,27 @@ export interface ChallengePayload {
 }
 
 export interface HelloPayload {
-  connId: string
+  type: 'hello-ok'
   protocol: number
-  features: string[]
-  serverVersion: string
-  sessionId?: string
+  server: {
+    version: string
+    connId: string
+  }
+  features: {
+    methods: string[]
+    events: string[]
+  }
+  auth: {
+    role: string
+    scopes: string[]
+    issuedAtMs: number
+  }
+  policy: {
+    tickIntervalMs: number
+  }
+  // Derived helpers set by client
+  connId?: string
+  serverVersion?: string
 }
 
 // ---------------------------------------------------------------------------

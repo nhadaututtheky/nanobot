@@ -20,28 +20,28 @@ export const rpc = {
 
   system: {
     status: () =>
-      call('system.status'),
+      call('status'),
 
     health: () =>
-      call('system.health'),
+      call('health'),
 
     modelsList: () =>
-      call('system.models.list'),
+      call('models.list'),
 
     lastHeartbeat: () =>
-      call('system.last_heartbeat'),
+      call('last-heartbeat'),
 
     systemPresence: () =>
-      call('system.presence'),
+      call('system-presence'),
 
     logsTail: (params: { lines?: number; level?: string } = {}) =>
-      call('system.logs.tail', params as Record<string, unknown>),
+      call('logs.tail', params as Record<string, unknown>),
 
     updateRun: () =>
-      call('system.update.run'),
+      call('update.run'),
 
     usageCost: (params: { period?: string } = {}) =>
-      call('system.usage.cost', params as Record<string, unknown>),
+      call('usage.cost', params as Record<string, unknown>),
   },
 
   // -------------------------------------------------------------------------
@@ -157,10 +157,10 @@ export const rpc = {
       call('channels.logout', params as Record<string, unknown>),
 
     webLoginStart: (params: { channelId: string }) =>
-      call('channels.web_login.start', params as Record<string, unknown>),
+      call('web.login.start', params as Record<string, unknown>),
 
     webLoginWait: (params: { channelId: string; requestId: string }) =>
-      call('channels.web_login.wait', params as Record<string, unknown>),
+      call('web.login.wait', params as Record<string, unknown>),
   },
 
   // -------------------------------------------------------------------------
@@ -172,7 +172,7 @@ export const rpc = {
       call('agents.list'),
 
     identityGet: (params: { agentId: string }) =>
-      call('agents.identity.get', params as Record<string, unknown>),
+      call('agent.identity.get', params as Record<string, unknown>),
 
     filesList: (params: { agentId: string }) =>
       call('agents.files.list', params as Record<string, unknown>),
@@ -184,7 +184,7 @@ export const rpc = {
       call('agents.files.set', params as Record<string, unknown>),
 
     toolsCatalog: () =>
-      call('agents.tools.catalog'),
+      call('tools.catalog'),
   },
 
   // -------------------------------------------------------------------------
@@ -208,19 +208,19 @@ export const rpc = {
 
   devices: {
     pairList: () =>
-      call('devices.pair.list'),
+      call('device.pair.list'),
 
     pairApprove: (params: { requestId: string }) =>
-      call('devices.pair.approve', params as Record<string, unknown>),
+      call('device.pair.approve', params as Record<string, unknown>),
 
     pairReject: (params: { requestId: string }) =>
-      call('devices.pair.reject', params as Record<string, unknown>),
+      call('device.pair.reject', params as Record<string, unknown>),
 
     tokenRotate: (params: { deviceId: string }) =>
-      call('devices.token.rotate', params as Record<string, unknown>),
+      call('device.token.rotate', params as Record<string, unknown>),
 
     tokenRevoke: (params: { deviceId: string }) =>
-      call('devices.token.revoke', params as Record<string, unknown>),
+      call('device.token.revoke', params as Record<string, unknown>),
   },
 
   // -------------------------------------------------------------------------
@@ -229,19 +229,19 @@ export const rpc = {
 
   execApprovals: {
     get: () =>
-      call('exec_approvals.get'),
+      call('exec.approvals.get'),
 
     set: (params: { rules: Record<string, unknown> }) =>
-      call('exec_approvals.set', params as Record<string, unknown>),
+      call('exec.approvals.set', params as Record<string, unknown>),
 
     nodeGet: (params: { nodeId: string }) =>
-      call('exec_approvals.node.get', params as Record<string, unknown>),
+      call('exec.approvals.node.get', params as Record<string, unknown>),
 
     nodeSet: (params: { nodeId: string; rules: Record<string, unknown> }) =>
-      call('exec_approvals.node.set', params as Record<string, unknown>),
+      call('exec.approvals.node.set', params as Record<string, unknown>),
 
     resolve: (params: { approvalId: string; approved: boolean; reason?: string }) =>
-      call('exec_approval.resolve', params as Record<string, unknown>),
+      call('exec.approval.resolve', params as Record<string, unknown>),
   },
 
   // -------------------------------------------------------------------------
@@ -250,6 +250,29 @@ export const rpc = {
 
   nodes: {
     list: () =>
-      call('nodes.list'),
+      call('node.list'),
+  },
+
+  // -------------------------------------------------------------------------
+  // AI Gateway (CLIProxyAPI service management)
+  // -------------------------------------------------------------------------
+
+  aiGateway: {
+    status: () =>
+      call<{
+        running: boolean
+        pid: number | null
+        binaryFound: boolean
+        binaryPath: string | null
+        managementUrl: string
+        proxyUrl: string
+        enabled: boolean
+      }>('ai-gateway.status'),
+
+    start: () =>
+      call<{ ok: boolean; pid: number; alreadyRunning: boolean }>('ai-gateway.start'),
+
+    stop: () =>
+      call<{ ok: boolean; wasRunning: boolean; pid?: number }>('ai-gateway.stop'),
   },
 } as const

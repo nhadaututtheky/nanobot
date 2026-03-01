@@ -199,6 +199,17 @@ class MatrixConfig(Base):
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
 
+class TelegramUserbotConfig(Base):
+    """Telegram userbot (Telethon MTProto) configuration for observing bot messages."""
+
+    enabled: bool = False
+    api_id: int = 0
+    api_hash: str = ""
+    phone: str = ""
+    session_path: str = "~/.nanobot/telegram_userbot"
+    observe_groups: list[str] = Field(default_factory=list)  # Chat IDs to observe (empty = all)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -206,6 +217,7 @@ class ChannelsConfig(Base):
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    telegram_userbot: TelegramUserbotConfig = Field(default_factory=TelegramUserbotConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
     mochat: MochatConfig = Field(default_factory=MochatConfig)
@@ -280,6 +292,17 @@ class HeartbeatConfig(Base):
     interval_s: int = 30 * 60  # 30 minutes
 
 
+class AiGatewayConfig(Base):
+    """AI Gateway (CLIProxyAPI) service configuration."""
+
+    enabled: bool = False
+    binary_path: str = ""  # Path to cli-proxy-api.exe
+    config_path: str = ""  # Path to config.yaml (auto-created if missing)
+    management_url: str = "http://localhost:8317/v0/management"
+    proxy_url: str = "http://localhost:20128/v1"
+    auto_start: bool = False  # Start AI Gateway automatically with NanoBot
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
@@ -287,6 +310,7 @@ class GatewayConfig(Base):
     port: int = 18790
     token: str = ""  # Auth token for WS clients (empty = allow all)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    ai_gateway: AiGatewayConfig = Field(default_factory=AiGatewayConfig)
 
 
 class WebSearchConfig(Base):

@@ -42,7 +42,15 @@ export function ChannelsGrid() {
     refetchInterval: 30_000,
   })
 
-  const channels = (data as ChannelInfo[] | undefined) ?? []
+  // Server returns { name: { enabled, running } } object
+  const raw = data as Record<string, { enabled?: boolean; running?: boolean }> | undefined
+  const channels: ChannelInfo[] = raw
+    ? Object.entries(raw).map(([name, info]) => ({
+        name,
+        enabled: info.enabled ?? false,
+        running: info.running ?? false,
+      }))
+    : []
 
   if (isLoading) {
     return (

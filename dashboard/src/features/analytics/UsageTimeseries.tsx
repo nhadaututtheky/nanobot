@@ -54,7 +54,10 @@ export function UsageTimeseries({ sessionKeys }: UsageTimeseriesProps) {
         granularity: 'day',
       }),
     enabled: !!selectedSession,
-    select: (d) => d as TimeseriesPoint[],
+    select: (d) => {
+      const raw = d as { points?: TimeseriesPoint[] } | TimeseriesPoint[]
+      return Array.isArray(raw) ? raw : (raw.points ?? [])
+    },
   })
 
   return (
@@ -88,7 +91,7 @@ export function UsageTimeseries({ sessionKeys }: UsageTimeseriesProps) {
                   <SelectValue placeholder="Select session" />
                 </SelectTrigger>
                 <SelectContent>
-                  {sessionKeys.map((k) => (
+                  {[...new Set(sessionKeys)].map((k) => (
                     <SelectItem key={k} value={k}>
                       <span className="font-mono text-xs">{k}</span>
                     </SelectItem>

@@ -137,6 +137,17 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("QQ channel not available: {}", e)
         
+        # Telegram userbot (Telethon MTProto — observes bot messages in groups)
+        if self.config.channels.telegram_userbot.enabled:
+            try:
+                from nanobot.channels.telegram_userbot import TelegramUserbotChannel
+                self.channels["telegram_userbot"] = TelegramUserbotChannel(
+                    self.config.channels.telegram_userbot, self.bus
+                )
+                logger.info("Telegram userbot channel enabled")
+            except ImportError as e:
+                logger.warning("Telegram userbot channel not available: {}", e)
+
         # Matrix channel
         if self.config.channels.matrix.enabled:
             try:

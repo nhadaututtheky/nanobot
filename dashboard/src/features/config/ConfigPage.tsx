@@ -27,7 +27,13 @@ export function ConfigPage() {
   const { data: remoteConfig, isLoading } = useQuery({
     queryKey: ['config'],
     queryFn: () => rpc.config.get(),
-    select: (data) => data as Record<string, ConfigValue>,
+    select: (data) => {
+      const d = data as { raw?: string } | Record<string, ConfigValue>
+      if (d && 'raw' in d && typeof d.raw === 'string') {
+        try { return JSON.parse(d.raw) as Record<string, ConfigValue> } catch { return {} }
+      }
+      return d as Record<string, ConfigValue>
+    },
   })
 
   // Sync remote into local state on first load (render-phase guard is safe here

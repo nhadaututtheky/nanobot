@@ -47,9 +47,9 @@ class Session:
         unconsolidated = self.messages[self.last_consolidated:]
         sliced = unconsolidated[-max_messages:]
 
-        # Drop leading non-user messages to avoid orphaned tool_result blocks
+        # Drop leading non-user/non-context messages to avoid orphaned tool_result blocks
         for i, m in enumerate(sliced):
-            if m.get("role") == "user":
+            if m.get("role") in ("user", "context"):
                 sliced = sliced[i:]
                 break
 

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import uuid
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +18,19 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 
 
+# Role definitions: which tools each role gets access to.
+# "all" is the default set (everything except message/spawn).
+ROLE_TOOLS: dict[str, set[str]] = {
+    "researcher": {"read_file", "list_dir", "web_search", "web_fetch"},
+    "coder": {"read_file", "write_file", "edit_file", "list_dir", "exec", "web_search", "web_fetch"},
+    "reviewer": {"read_file", "list_dir"},
+    "general": set(),  # empty means all registered tools
+}
+
+
 class SubagentManager:
     """Manages background subagent execution."""
-    
+
     def __init__(
         self,
         provider: LLMProvider,
@@ -31,6 +42,7 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        mcp_servers: dict | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -42,9 +54,10 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.mcp_servers = mcp_servers or {}
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
-    
+
     async def spawn(
         self,
         task: str,
@@ -52,14 +65,18 @@ class SubagentManager:
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
+        role: str = "general",
+        context: str | None = None,
+        max_iterations: int = 15,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
+        clamped_iters = max(1, min(max_iterations, 40))
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(task_id, task, display_label, origin, role, context, clamped_iters)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -73,52 +90,95 @@ class SubagentManager:
                     del self._session_tasks[session_key]
 
         bg_task.add_done_callback(_cleanup)
-        
-        logger.info("Spawned subagent [{}]: {}", task_id, display_label)
-        return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
-    
+
+        logger.info("Spawned subagent [{}] (role={}): {}", task_id, role, display_label)
+        return f"Subagent [{display_label}] started (id: {task_id}, role: {role}). I'll notify you when it completes."
+
+    def _build_tools(self, role: str) -> ToolRegistry:
+        """Build tool registry for a subagent, filtered by role."""
+        tools = ToolRegistry()
+        allowed_dir = self.workspace if self.restrict_to_workspace else None
+
+        # Register all candidate tools
+        all_tools: list = [
+            ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir),
+            WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir),
+            EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir),
+            ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir),
+            ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.restrict_to_workspace,
+                path_append=self.exec_config.path_append,
+            ),
+            WebSearchTool(api_key=self.brave_api_key),
+            WebFetchTool(),
+        ]
+
+        allowed = ROLE_TOOLS.get(role, set())
+        for tool in all_tools:
+            if not allowed or tool.name in allowed:
+                tools.register(tool)
+
+        return tools
+
+    async def _connect_mcp_for_subagent(
+        self, tools: ToolRegistry, stack: AsyncExitStack, role: str,
+    ) -> None:
+        """Connect MCP servers and register tools for a subagent."""
+        if not self.mcp_servers:
+            return
+        from nanobot.agent.tools.mcp import connect_mcp_servers
+
+        try:
+            await connect_mcp_servers(self.mcp_servers, tools, stack)
+
+            # If role has tool restrictions, remove MCP tools not in the allowed set
+            # (but MCP tools like nmem_* are always allowed for researcher/reviewer roles)
+            allowed = ROLE_TOOLS.get(role, set())
+            if allowed:
+                # MCP tools (e.g. nmem_*) are allowed for roles that include read-only access
+                # We keep all MCP tools — they are specifically why we connect MCP servers
+                pass
+        except Exception as e:
+            logger.warning("Subagent MCP connection failed (continuing without): {}", e)
+
     async def _run_subagent(
         self,
         task_id: str,
         task: str,
         label: str,
         origin: dict[str, str],
+        role: str = "general",
+        context: str | None = None,
+        max_iterations: int = 15,
     ) -> None:
         """Execute the subagent task and announce the result."""
-        logger.info("Subagent [{}] starting task: {}", task_id, label)
-        
+        logger.info("Subagent [{}] starting task (role={}): {}", task_id, role, label)
+
+        mcp_stack = AsyncExitStack()
+        await mcp_stack.__aenter__()
+
         try:
-            # Build subagent tools (no message tool, no spawn tool)
-            tools = ToolRegistry()
-            allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-                path_append=self.exec_config.path_append,
-            ))
-            tools.register(WebSearchTool(api_key=self.brave_api_key))
-            tools.register(WebFetchTool())
-            
+            tools = self._build_tools(role)
+
+            # Connect MCP servers for subagent (e.g. neural memory)
+            await self._connect_mcp_for_subagent(tools, mcp_stack, role)
+
             # Build messages with subagent-specific prompt
-            system_prompt = self._build_subagent_prompt(task)
+            system_prompt = self._build_subagent_prompt(task, role, context)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
             ]
-            
+
             # Run agent loop (limited iterations)
-            max_iterations = 15
             iteration = 0
             final_result: str | None = None
-            
+
             while iteration < max_iterations:
                 iteration += 1
-                
+
                 response = await self.provider.chat(
                     messages=messages,
                     tools=tools.get_definitions(),
@@ -126,7 +186,7 @@ class SubagentManager:
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                 )
-                
+
                 if response.has_tool_calls:
                     # Add assistant message with tool calls
                     tool_call_dicts = [
@@ -145,7 +205,7 @@ class SubagentManager:
                         "content": response.content or "",
                         "tool_calls": tool_call_dicts,
                     })
-                    
+
                     # Execute tools
                     for tool_call in response.tool_calls:
                         args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
@@ -160,18 +220,23 @@ class SubagentManager:
                 else:
                     final_result = response.content
                     break
-            
+
             if final_result is None:
                 final_result = "Task completed but no final response was generated."
-            
+
             logger.info("Subagent [{}] completed successfully", task_id)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
-            
+
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
-    
+        finally:
+            try:
+                await mcp_stack.aclose()
+            except (RuntimeError, BaseExceptionGroup):
+                pass
+
     async def _announce_result(
         self,
         task_id: str,
@@ -183,7 +248,7 @@ class SubagentManager:
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
-        
+
         announce_content = f"""[Subagent '{label}' {status_text}]
 
 Task: {task}
@@ -192,7 +257,7 @@ Result:
 {result}
 
 Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs."""
-        
+
         # Inject as system message to trigger main agent
         msg = InboundMessage(
             channel="system",
@@ -200,36 +265,40 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
         )
-        
+
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
-    
-    def _build_subagent_prompt(self, task: str) -> str:
+
+    def _build_subagent_prompt(self, task: str, role: str = "general", context: str | None = None) -> str:
         """Build a focused system prompt for the subagent."""
         from datetime import datetime
         import time as _time
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = _time.strftime("%Z") or "UTC"
 
-        return f"""# Subagent
+        role_descriptions = {
+            "researcher": "You are a **researcher** subagent. Focus on gathering information, reading files, searching the web, and querying neural memory. Do NOT modify files.",
+            "coder": "You are a **coder** subagent. Focus on writing, editing, and executing code to complete the task.",
+            "reviewer": "You are a **reviewer** subagent. Focus on reading and analyzing code or content. Do NOT modify files.",
+            "general": "You are a general-purpose subagent. Use all available tools to complete the task.",
+        }
+
+        role_desc = role_descriptions.get(role, role_descriptions["general"])
+        context_block = f"\n## Context from Parent Agent\n{context}\n" if context else ""
+
+        return f"""# Subagent ({role})
 
 ## Current Time
 {now} ({tz})
 
-You are a subagent spawned by the main agent to complete a specific task.
+{role_desc}
 
 ## Rules
 1. Stay focused - complete only the assigned task, nothing else
 2. Your final response will be reported back to the main agent
 3. Do not initiate conversations or take on side tasks
 4. Be concise but informative in your findings
-
-## What You Can Do
-- Read and write files in the workspace
-- Execute shell commands
-- Search the web and fetch web pages
-- Complete the task thoroughly
-
+{context_block}
 ## What You Cannot Do
 - Send messages directly to users (no message tool available)
 - Spawn other subagents
@@ -240,7 +309,7 @@ Your workspace is at: {self.workspace}
 Skills are available at: {self.workspace}/skills/ (read SKILL.md files as needed)
 
 When you have completed the task, provide a clear summary of your findings or actions."""
-    
+
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""
         tasks = [self._running_tasks[tid] for tid in self._session_tasks.get(session_key, [])

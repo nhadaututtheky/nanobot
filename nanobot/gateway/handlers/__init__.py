@@ -8,6 +8,7 @@ from typing import Any
 def collect_routes() -> dict[str, Any]:
     """Import every handler module and merge their ROUTES dicts."""
     from . import (
+        ai_gateway,
         agents,
         channels,
         chat,
@@ -34,6 +35,7 @@ def collect_routes() -> dict[str, Any]:
         devices,
         nodes,
         exec_approvals,
+        ai_gateway,
     ):
         merged.update(module.ROUTES)
     return merged
