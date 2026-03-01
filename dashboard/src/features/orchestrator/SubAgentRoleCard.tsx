@@ -198,6 +198,17 @@ export function SubAgentRoleCard({
                   ({mainModelShort})
                 </span>
               </SelectItem>
+              {/* Show current model even if not in available list (e.g. before restart) */}
+              {config.model && !availableModels.some((m) => m.model === config.model) && (
+                <SelectItem value={config.model}>
+                  <span className="flex items-center gap-1.5">
+                    <span className="font-mono">{config.model.split('/').pop()}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      (saved)
+                    </span>
+                  </span>
+                </SelectItem>
+              )}
               {availableModels.map((m) => (
                 <SelectItem key={m.model} value={m.model}>
                   <span className="flex items-center gap-1.5">

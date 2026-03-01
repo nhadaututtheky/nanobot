@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,10 @@ from nanobot.gateway.context import GatewayContext
 from nanobot.gateway.protocol import GatewayError
 
 logger = logging.getLogger(__name__)
+
+# Patterns for input validation
+_SAFE_NAME = re.compile(r"^[a-zA-Z0-9_.-]{1,100}$")
+_SAFE_SLUG = re.compile(r"^[a-zA-Z0-9_@/.:-]{1,200}$")
 
 # ---------------------------------------------------------------------------
 # Builtin skills directory (mirrors SkillsLoader)
@@ -132,8 +137,14 @@ async def handle_skills_update(ctx: GatewayContext, conn: ClientConnection, para
     if not skill_key:
         raise GatewayError("INVALID_PARAMS", "skillKey required")
 
+    if not _SAFE_NAME.match(skill_key):
+        raise GatewayError("INVALID_PARAMS", "invalid skill key")
+
     workspace = ctx.config.workspace_path
-    skill_dir = workspace / "skills" / skill_key
+    skill_dir = (workspace / "skills" / skill_key).resolve()
+    base = (workspace / "skills").resolve()
+    if not skill_dir.is_relative_to(base):
+        raise GatewayError("FORBIDDEN", "path traversal not allowed")
     if not skill_dir.exists():
         raise GatewayError("NOT_FOUND", f"skill {skill_key} not found")
 
@@ -161,10 +172,15 @@ async def handle_skills_install(ctx: GatewayContext, conn: ClientConnection, par
     name = params.get("name")
     if not name:
         raise GatewayError("INVALID_PARAMS", "name required")
+    if not _SAFE_NAME.match(name):
+        raise GatewayError("INVALID_PARAMS", "invalid skill name")
 
     timeout_ms = min(params.get("timeoutMs", 60000), 120_000)  # cap at 2 min
     workspace = ctx.config.workspace_path
-    skill_dir = workspace / "skills" / name
+    skill_dir = (workspace / "skills" / name).resolve()
+    base = (workspace / "skills").resolve()
+    if not skill_dir.is_relative_to(base):
+        raise GatewayError("FORBIDDEN", "path traversal not allowed")
 
     if not skill_dir.exists():
         raise GatewayError("NOT_FOUND", f"skill {name} not found")
@@ -220,6 +236,8 @@ async def handle_skills_search(ctx: GatewayContext, conn: ClientConnection, para
     query = params.get("query", "").strip()
     if not query:
         raise GatewayError("INVALID_PARAMS", "query required")
+    if len(query) > 200:
+        raise GatewayError("INVALID_PARAMS", "query too long")
 
     limit = min(params.get("limit", 20), 50)
     workspace = ctx.config.workspace_path
@@ -257,6 +275,8 @@ async def handle_skills_marketplace_install(ctx: GatewayContext, conn: ClientCon
     slug = params.get("slug", "").strip()
     if not slug:
         raise GatewayError("INVALID_PARAMS", "slug required")
+    if not _SAFE_SLUG.match(slug):
+        raise GatewayError("INVALID_PARAMS", "invalid slug format")
 
     workspace = ctx.config.workspace_path
 

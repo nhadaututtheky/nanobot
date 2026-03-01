@@ -1,7 +1,10 @@
 """Configuration loading utilities."""
 
 import json
+import secrets
 from pathlib import Path
+
+from loguru import logger
 
 from nanobot.config.schema import Config
 
@@ -34,12 +37,16 @@ def load_config(config_path: Path | None = None) -> Config:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(data)
+            config = Config.model_validate(data)
+            _ensure_gateway_token(config, path)
+            return config
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"Warning: Failed to load config from {path}: {e}")
-            print("Using default configuration.")
+            logger.warning("Failed to load config from {}: {}", path, e)
+            logger.warning("Using default configuration.")
 
-    return Config()
+    config = Config()
+    _ensure_gateway_token(config, path)
+    return config
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
@@ -57,6 +64,29 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _ensure_gateway_token(config: Config, config_path: Path) -> None:
+    """Generate a random gateway token if none is set, and persist it."""
+    if config.gateway.token:
+        return
+    token = secrets.token_urlsafe(32)
+    config.gateway.token = token
+    logger.warning(
+        "No gateway token configured — generated one automatically. "
+        "Dashboard/clients must use this token to connect."
+    )
+    # Persist to config file so it survives restarts
+    try:
+        data: dict = {}
+        if config_path.exists():
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+        data.setdefault("gateway", {})["token"] = token
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        logger.info("Gateway token saved to {}", config_path)
+    except Exception as e:
+        logger.error("Failed to save gateway token to {}: {}", config_path, e)
 
 
 def _migrate_config(data: dict) -> dict:

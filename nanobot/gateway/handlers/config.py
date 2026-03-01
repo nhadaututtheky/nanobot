@@ -6,8 +6,8 @@ import hashlib
 import logging
 from typing import Any
 
-from nanobot.gateway.context import GatewayContext
 from nanobot.gateway.connection import ClientConnection
+from nanobot.gateway.context import GatewayContext
 from nanobot.gateway.protocol import GatewayError
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ async def handle_config_schema(ctx: GatewayContext, conn: ClientConnection, para
 async def _validate_and_save(ctx: GatewayContext, raw: str, base_hash: str | None) -> str:
     """Validate config, save to disk, return new hash. No side effects."""
     import json
+
     from nanobot.config.schema import Config
 
     # Conflict detection
@@ -54,7 +55,8 @@ async def _validate_and_save(ctx: GatewayContext, raw: str, base_hash: str | Non
         parsed = json.loads(raw)
         Config.model_validate(parsed)
     except Exception as exc:
-        raise GatewayError("VALIDATION_FAILED", str(exc))
+        logger.warning("Config validation failed: %s", exc)
+        raise GatewayError("VALIDATION_FAILED", "invalid configuration format")
 
     ctx.config_path.write_text(raw, encoding="utf-8")
     return _hash_content(raw)
@@ -72,7 +74,7 @@ async def handle_config_set(ctx: GatewayContext, conn: ClientConnection, params:
     # Note: response is sent by dispatcher before this, since we return first
     import asyncio
     asyncio.get_running_loop().call_soon(
-        lambda: asyncio.ensure_future(ctx.broadcaster.close_all(code=1012, reason="config changed"))
+        lambda: asyncio.create_task(ctx.broadcaster.close_all(code=1012, reason="config changed"))
     )
 
     return {"hash": new_hash}
@@ -88,7 +90,7 @@ async def handle_config_apply(ctx: GatewayContext, conn: ClientConnection, param
 
     # Fire agent task in background, then schedule close_all
     import asyncio
-    session_key = params.get("sessionKey", "system:config")
+    session_key = "system:config"  # Always use fixed session key (not client-controlled)
 
     async def _apply_and_close() -> None:
         try:

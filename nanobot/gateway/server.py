@@ -16,7 +16,7 @@ from websockets.asyncio.server import ServerConnection
 from .connection import ClientConnection
 from .context import GatewayContext
 from .dispatcher import Dispatcher
-from .protocol import GatewayError, RequestFrame, parse_request
+from .protocol import RequestFrame, parse_request
 
 logger = logging.getLogger(__name__)
 

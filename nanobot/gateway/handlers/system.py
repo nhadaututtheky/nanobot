@@ -82,8 +82,10 @@ async def handle_system_presence(ctx: GatewayContext, conn: ClientConnection, pa
 
 async def handle_logs_tail(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:
     """Read last N lines from log file."""
-    limit = params.get("limit", 100)
+    limit = min(params.get("limit", 100), 1000)  # Cap at 1000 lines
     cursor = params.get("cursor")
+    if isinstance(cursor, int) and cursor < 0:
+        cursor = 0
 
     log_path = ctx.config.workspace_path / "logs" / "nanobot.log"
     if not log_path.exists():
@@ -102,7 +104,8 @@ async def handle_logs_tail(ctx: GatewayContext, conn: ClientConnection, params: 
             "hasMore": (start + len(selected)) < len(lines),
         }
     except Exception as exc:
-        raise GatewayError("LOG_READ_FAILED", str(exc))
+        logger.warning("Log read failed: %s", exc)
+        raise GatewayError("LOG_READ_FAILED", "failed to read log file")
 
 
 async def handle_update_run(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:

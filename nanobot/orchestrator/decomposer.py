@@ -107,6 +107,17 @@ class GoalDecomposer:
                 logger.warning("Decomposer got empty response, retrying...")
                 continue
 
+            # Detect error messages leaked into content (provider/gateway errors)
+            error_prefixes = (
+                "Error calling LLM",
+                "There's an issue with the selected model",
+                "InternalServerError",
+            )
+            if any(raw.startswith(ep) for ep in error_prefixes):
+                last_error = ValueError(f"LLM provider error: {raw[:200]}")
+                logger.warning("Decomposer got provider error (attempt {}): {}", attempt + 1, raw[:200])
+                continue
+
             # Strip markdown fences if the model wraps output
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()

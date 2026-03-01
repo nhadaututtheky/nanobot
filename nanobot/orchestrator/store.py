@@ -78,8 +78,11 @@ class GraphStore:
         await self.add(graph)
 
     def get(self, graph_id: str) -> TaskGraph | None:
-        """Get a graph by ID."""
-        for g in self._load():
+        """Get a graph by ID (thread-safe via in-memory cache)."""
+        # _load() is safe to call without lock — it only reads from _cache or
+        # does one-time disk load. Write operations hold _lock.
+        graphs = self._load()
+        for g in graphs:
             if g.id == graph_id:
                 return g
         return None

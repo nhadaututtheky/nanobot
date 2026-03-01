@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -23,14 +23,77 @@ class WhatsAppConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
 
 
+class TelegramRetryConfig(Base):
+    """Retry with exponential backoff for Telegram API calls."""
+
+    attempts: int = 3
+    min_delay_ms: int = 500
+    max_delay_ms: int = 10000
+    jitter: bool = True
+
+
+class TelegramDMConfig(Base):
+    """DM access policy for Telegram."""
+
+    mode: Literal["open", "allowlist", "disabled"] = "open"
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs (for allowlist mode)
+    history_limit: int = 50
+
+
+class TelegramGroupConfig(Base):
+    """Per-group override config (keyed by chat_id string in groups dict)."""
+
+    enabled: bool = True
+    require_mention: bool = True  # If false, bot responds to all messages
+    system_prompt: str = ""  # Injected system prompt for this group
+    allow_from: list[str] = Field(default_factory=list)  # Per-group allowlist
+    history_limit: int = 100
+
+
+class TelegramActionsConfig(Base):
+    """Toggle Telegram bot actions on/off."""
+
+    send_message: bool = True
+    delete_message: bool = False
+    set_reaction: bool = True
+
+
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
+    # --- Existing (backward compatible) ---
     enabled: bool = False
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     reply_to_message: bool = False  # If true, bot replies quote the original message
+
+    # --- Retry ---
+    retry: TelegramRetryConfig = Field(default_factory=TelegramRetryConfig)
+
+    # --- Access control ---
+    dm: TelegramDMConfig = Field(default_factory=TelegramDMConfig)
+    groups: dict[str, TelegramGroupConfig] = Field(default_factory=dict)
+    actions: TelegramActionsConfig = Field(default_factory=TelegramActionsConfig)
+
+    # --- Behavior ---
+    ack_reaction: str = ""  # Emoji to react with on processing start (e.g. "eyes"). Empty = disabled
+    link_preview: bool = True  # False → sends disable_web_page_preview=True
+    response_prefix: str = ""  # Text prepended to every response
+    chunk_mode: Literal["length", "newline"] = "newline"  # How to split long messages
+    history_limit: int = 100  # Default history window
+
+    # --- Streaming ---
+    streaming: Literal["off", "draft", "edit"] = "off"  # draft=sendMessageDraft, edit=edit_message_text
+
+    # --- Transport ---
+    mode: Literal["polling", "webhook"] = "polling"
+    webhook_url: str = ""  # HTTPS URL for webhook mode
+    webhook_port: int = 8443
+    webhook_path: str = "/telegram/webhook"
+    allowed_updates: list[str] = Field(
+        default_factory=lambda: ["message", "edited_message", "callback_query", "message_reaction"]
+    )
 
 
 class FeishuConfig(Base):
@@ -184,20 +247,6 @@ class QQConfig(Base):
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
-class MatrixConfig(Base):
-    """Matrix (Element) channel configuration."""
-    enabled: bool = False
-    homeserver: str = "https://matrix.org"
-    access_token: str = ""
-    user_id: str = ""                       # e.g. @bot:matrix.org
-    device_id: str = ""
-    e2ee_enabled: bool = True               # end-to-end encryption support
-    sync_stop_grace_seconds: int = 2        # graceful sync_forever shutdown timeout
-    max_media_bytes: int = 20 * 1024 * 1024 # inbound + outbound attachment limit
-    allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
-    group_allow_from: list[str] = Field(default_factory=list)
-    allow_room_mentions: bool = False
 
 class TelegramUserbotConfig(Base):
     """Telegram userbot (Telethon MTProto) configuration for observing bot messages."""
@@ -232,7 +281,7 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
-    model: str = "anthropic/claude-opus-4-5"
+    model: str = "anthropic/claude-opus-4-6"
     provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     max_tokens: int = 8192
     temperature: float = 0.1
@@ -347,7 +396,7 @@ class SubAgentConfig(Base):
 class ModelCapabilityConfig(Base):
     """User-configurable model capability entry for orchestrator routing."""
 
-    model: str = ""  # e.g. "anthropic/claude-opus-4-5"
+    model: str = ""  # e.g. "anthropic/claude-opus-4-6"
     provider: str = ""  # e.g. "anthropic"
     capabilities: list[str] = Field(default_factory=list)  # ["reasoning", "coding", ...]
     tier: str = "mid"  # "high" | "mid" | "low"
@@ -368,6 +417,7 @@ class OrchestratorConfig(Base):
     # Telegram integration (multi-bot orchestrator)
     telegram_group_id: str = ""  # Chat ID where sub-agents post progress
     telegram_result_channel: str = ""  # Channel/chat ID for final summary
+    telegram_progress_throttle_s: float = 20.0  # Min seconds between progress posts per node
 
 
 class AgentsConfig(Base):
@@ -438,9 +488,9 @@ class AiGatewayConfig(Base):
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"  # Default to localhost only — set "0.0.0.0" to expose to network
     port: int = 18790
-    token: str = ""  # Auth token for WS clients (empty = allow all)
+    token: str = ""  # Auth token for WS clients (auto-generated on first run if empty)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     ai_gateway: AiGatewayConfig = Field(default_factory=AiGatewayConfig)
 

@@ -87,16 +87,21 @@ class GraphExecutor:
         graph.started_at = datetime.now().isoformat()
         await self._save(graph)
         await self._emit("graph_started", graph)
+        if self._telegram:
+            await self._telegram.send_graph_started(graph)
 
+        inflight: set[asyncio.Task[None]] = set()
         try:
             while True:
                 ready = graph.get_ready_tasks()
                 if not ready:
-                    # Check if we're done or stuck
-                    running = [n for n in graph.nodes if n.status == TaskStatus.RUNNING]
-                    if running:
-                        # Wait for running tasks to finish
-                        await asyncio.sleep(0.5)
+                    # Clean up finished tasks
+                    inflight = {t for t in inflight if not t.done()}
+                    if inflight:
+                        # Wait for at least one running task to finish (event-driven)
+                        _done, inflight = await asyncio.wait(
+                            inflight, return_when=asyncio.FIRST_COMPLETED,
+                        )
                         continue
 
                     pending = [n for n in graph.nodes if n.status == TaskStatus.PENDING]
@@ -114,13 +119,16 @@ class GraphExecutor:
 
                 # Launch ready nodes in parallel
                 tasks = [asyncio.create_task(self._run_node(graph, node)) for node in ready]
+                inflight.update(tasks)
                 # Mark as queued immediately
                 for node in ready:
                     node.status = TaskStatus.QUEUED
                 await self._save(graph)
 
                 # Wait for this wave to complete
-                await asyncio.gather(*tasks, return_exceptions=True)
+                _done, inflight = await asyncio.wait(
+                    inflight, return_when=asyncio.ALL_COMPLETED,
+                )
 
         except asyncio.CancelledError:
             logger.info("Graph {} cancelled", graph.id)
@@ -284,6 +292,19 @@ class GraphExecutor:
                 node.progress = min(0.9, iteration / max_iterations)
                 await self._save(graph)
                 await self._emit("node_progress", graph, node_id=node.id)
+
+                # Telegram progress (throttled inside sender)
+                if self._telegram and response.tool_calls:
+                    last_tc = response.tool_calls[-1]
+                    last_result = messages[-1].get("content", "") if messages else ""
+                    await self._telegram.send_node_progress(
+                        graph,
+                        node,
+                        tool_name=last_tc.name,
+                        tool_result_preview=last_result[:200] if last_result else "",
+                        iteration=iteration,
+                        max_iterations=max_iterations,
+                    )
             else:
                 final_result = response.content
                 break
@@ -343,18 +364,14 @@ class GraphExecutor:
         role: str,
     ) -> None:
         """Connect MCP servers for a node."""
-        mcp_servers = dict(self._config.tools.mcp_servers) if self._config.tools.mcp_servers else {}
+        mcp_servers = self._config.tools.mcp_servers
         if not mcp_servers:
             return
         from nanobot.agent.tools.mcp import connect_mcp_servers
 
         try:
-            # Convert MCPServerConfig objects to dicts for connect_mcp_servers
-            servers_dict: dict[str, Any] = {}
-            for name, cfg in mcp_servers.items():
-                servers_dict[name] = cfg.model_dump() if hasattr(cfg, "model_dump") else cfg
-            await connect_mcp_servers(servers_dict, tools, stack)
-        except Exception as e:
+            await connect_mcp_servers(dict(mcp_servers), tools, stack)
+        except BaseException as e:
             logger.warning("Node MCP connection failed (continuing without): {}", e)
 
     # --- prompt building ---

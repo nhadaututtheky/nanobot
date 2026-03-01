@@ -25,7 +25,6 @@ from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
-
 # ═══ CLI Helpers ═══
 
 def _get_cli_path() -> str | None:
@@ -182,7 +181,7 @@ class ClaudeCLIProvider(LLMProvider):
         except Exception as e:
             logger.error("[CLAUDE-CLI] Error: {}", e)
             return LLMResponse(
-                content=f"Claude CLI error: {e}",
+                content="Claude CLI encountered an error. Check logs for details.",
                 finish_reason="error",
             )
 

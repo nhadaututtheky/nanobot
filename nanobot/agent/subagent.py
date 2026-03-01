@@ -9,14 +9,13 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
-
 
 # Preset maps: human-friendly labels → raw values
 THINKING_STYLE: dict[str, float] = {"creative": 1.0, "balanced": 0.7, "precise": 0.3}
@@ -44,10 +43,10 @@ class SubagentManager:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         brave_api_key: str | None = None,
-        exec_config: "ExecToolConfig | None" = None,
+        exec_config: "ExecToolConfig | None" = None,  # noqa: F821
         restrict_to_workspace: bool = False,
         mcp_servers: dict | None = None,
-        subagent_config: "SubAgentConfig | None" = None,
+        subagent_config: "SubAgentConfig | None" = None,  # noqa: F821
     ):
         from nanobot.config.schema import ExecToolConfig, SubAgentConfig
         self.provider = provider
@@ -323,8 +322,8 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
 
     def _build_subagent_prompt(self, task: str, role: str = "general", context: str | None = None) -> str:
         """Build a focused system prompt for the subagent."""
-        from datetime import datetime
         import time as _time
+        from datetime import datetime
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = _time.strftime("%Z") or "UTC"
 

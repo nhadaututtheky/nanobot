@@ -7,7 +7,7 @@ from typing import Any
 
 from websockets.asyncio.server import ServerConnection
 
-from .protocol import EventFrame, GatewayError, ResponseFrame, serialize_frame
+from .protocol import EventFrame, ResponseFrame, serialize_frame
 
 logger = logging.getLogger(__name__)
 

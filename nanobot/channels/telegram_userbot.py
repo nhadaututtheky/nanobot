@@ -148,7 +148,7 @@ async def _interactive_login() -> None:
     ub = config.channels.telegram_userbot
 
     if not ub.api_id or not ub.api_hash:
-        print("Error: telegram_userbot.api_id and api_hash must be set in config.json")
+        logger.error("telegram_userbot.api_id and api_hash must be set in config.json")
         sys.exit(1)
 
     session_path = Path(ub.session_path).expanduser()
@@ -159,7 +159,7 @@ async def _interactive_login() -> None:
 
     if await client.is_user_authorized():
         me = await client.get_me()
-        print(f"Already authorized as {me.first_name} ({me.phone})")
+        logger.info("Already authorized as {} ({})", me.first_name, me.phone)
         await client.disconnect()
         return
 
@@ -175,8 +175,8 @@ async def _interactive_login() -> None:
         await client.sign_in(password=password)
 
     me = await client.get_me()
-    print(f"Logged in as {me.first_name} ({me.phone})")
-    print(f"Session saved to {session_path}.session")
+    logger.info("Logged in as {} ({})", me.first_name, me.phone)
+    logger.info("Session saved to {}.session", session_path)
     await client.disconnect()
 
 

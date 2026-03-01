@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import platform
 import shutil
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,64 @@ logger = logging.getLogger(__name__)
 # Module-level process reference (singleton — one AI Gateway per NanoBot instance)
 _process: asyncio.subprocess.Process | None = None
 _log_task: asyncio.Task[None] | None = None
+
+
+def _extract_port(url: str) -> int | None:
+    """Extract port number from a URL like 'http://localhost:8317'."""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        return parsed.port
+    except Exception:
+        return None
+
+
+async def _kill_by_port(port: int) -> int | None:
+    """Find and kill a process listening on the given port. Returns PID if killed."""
+    try:
+        if platform.system() == "Windows":
+            # netstat to find PID on port
+            proc = await asyncio.create_subprocess_exec(
+                "netstat", "-ano", "-p", "TCP",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            for line in stdout.decode("utf-8", errors="replace").splitlines():
+                if f":{port}" in line and "LISTENING" in line:
+                    parts = line.split()
+                    pid = int(parts[-1])
+                    if pid > 0:
+                        kill_proc = await asyncio.create_subprocess_exec(
+                            "taskkill", "/F", "/PID", str(pid),
+                            stdout=asyncio.subprocess.DEVNULL,
+                            stderr=asyncio.subprocess.DEVNULL,
+                        )
+                        await kill_proc.wait()
+                        logger.info("[ai-gateway] Killed external process PID %d on port %d", pid, port)
+                        return pid
+        else:
+            # lsof/fuser on Unix
+            proc = await asyncio.create_subprocess_exec(
+                "lsof", "-ti", f":{port}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            pids = stdout.decode().strip().split()
+            if pids:
+                pid = int(pids[0])
+                kill_proc = await asyncio.create_subprocess_exec(
+                    "kill", "-9", str(pid),
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await kill_proc.wait()
+                logger.info("[ai-gateway] Killed external process PID %d on port %d", pid, port)
+                return pid
+    except Exception as exc:
+        logger.warning("[ai-gateway] Failed to kill by port %d: %s", port, exc)
+    return None
 
 
 def _resolve_binary(cfg_path: str) -> Path | None:
@@ -113,7 +172,8 @@ async def handle_ai_gateway_start(
             cwd=str(binary.parent),
         )
     except Exception as exc:
-        raise GatewayError("AI_GATEWAY_START_FAILED", str(exc))
+        logger.error("[ai-gateway] Start failed: %s", exc)
+        raise GatewayError("AI_GATEWAY_START_FAILED", "failed to start AI Gateway process")
 
     # Stream logs in background
     _log_task = asyncio.create_task(_stream_logs(_process))
@@ -139,30 +199,39 @@ async def handle_ai_gateway_stop(
     """Stop the AI Gateway service."""
     global _process, _log_task
 
-    if _process is None or _process.returncode is not None:
-        _process = None
-        return {"ok": True, "wasRunning": False}
-
-    pid = _process.pid
-    logger.info("[ai-gateway] Stopping PID %d", pid)
-
-    try:
-        _process.terminate()
+    if _process is not None and _process.returncode is None:
+        # Managed process — terminate gracefully
+        pid = _process.pid
+        logger.info("[ai-gateway] Stopping managed PID %d", pid)
         try:
-            await asyncio.wait_for(_process.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
-            _process.kill()
-            await _process.wait()
-    except ProcessLookupError:
-        pass
+            _process.terminate()
+            try:
+                await asyncio.wait_for(_process.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                _process.kill()
+                await _process.wait()
+        except ProcessLookupError:
+            pass
 
-    if _log_task and not _log_task.done():
-        _log_task.cancel()
-    _log_task = None
+        if _log_task and not _log_task.done():
+            _log_task.cancel()
+        _log_task = None
+        _process = None
+
+        logger.info("[ai-gateway] Stopped managed PID %d", pid)
+        return {"ok": True, "wasRunning": True, "pid": pid}
+
+    # No managed process — try killing by port (external/orphan gateway)
     _process = None
+    ai_cfg = ctx.config.gateway.ai_gateway
+    # Try management URL port first (more reliable), then proxy URL
+    port = _extract_port(ai_cfg.management_url) or _extract_port(ai_cfg.proxy_url)
+    if port:
+        killed_pid = await _kill_by_port(port)
+        if killed_pid:
+            return {"ok": True, "wasRunning": True, "pid": killed_pid}
 
-    logger.info("[ai-gateway] Stopped PID %d", pid)
-    return {"ok": True, "wasRunning": True, "pid": pid}
+    return {"ok": True, "wasRunning": False}
 
 
 ROUTES = {

@@ -67,7 +67,7 @@ class QQChannel(BaseChannel):
             return
 
         self._running = True
-        BotClass = _make_bot_class(self)
+        BotClass = _make_bot_class(self)  # noqa: N806
         self._client = BotClass()
 
         logger.info("QQ bot started (C2C private message)")

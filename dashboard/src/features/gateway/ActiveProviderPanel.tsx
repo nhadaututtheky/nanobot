@@ -301,13 +301,13 @@ interface SwitchOption {
 
 // Default models for each OAuth gateway prefix
 const OAUTH_MODELS: Record<string, { model: string; label: string }> = {
-  anthropic: { model: 'cc/claude-sonnet-4-5-20250929', label: 'Claude (Subscription)' },
+  anthropic: { model: 'cc/claude-sonnet-4-6', label: 'Claude (Subscription)' },
   codex: { model: 'cx/codex-mini-latest', label: 'Codex (Subscription)' },
   gemini: { model: 'gc/gemini-2.5-pro', label: 'Gemini CLI (Subscription)' },
   copilot: { model: 'gh/gpt-4.1', label: 'GitHub Copilot' },
-  iflow: { model: 'if/claude-sonnet-4-5-20250929', label: 'iFlow (Free)' },
+  iflow: { model: 'if/claude-sonnet-4-6', label: 'iFlow (Free)' },
   qwen: { model: 'qw/qwen3-coder-plus', label: 'Qwen (Free)' },
-  kiro: { model: 'kr/claude-sonnet-4-5-20250929', label: 'Kiro (Free)' },
+  kiro: { model: 'kr/claude-sonnet-4-6', label: 'Kiro (Free)' },
 }
 
 function QuickSwitcher({ currentModel, config, oauthProviders, onSwitch, isSwitching }: QuickSwitcherProps) {
@@ -346,11 +346,11 @@ function QuickSwitcher({ currentModel, config, oauthProviders, onSwitch, isSwitc
 
     // API providers — check if key is configured
     const apiProviders: Array<{ name: string; model: string; label: string }> = [
-      { name: 'anthropic', model: 'anthropic/claude-sonnet-4-5', label: 'Anthropic API (Sonnet 4.5)' },
+      { name: 'anthropic', model: 'anthropic/claude-sonnet-4-6', label: 'Anthropic API (Sonnet 4.6)' },
       { name: 'openai', model: 'openai/gpt-4.1', label: 'OpenAI (GPT-4.1)' },
       { name: 'deepseek', model: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' },
       { name: 'gemini', model: 'gemini/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-      { name: 'dashscope', model: 'dashscope/qwen-coder-plus-latest', label: 'DashScope (Qwen Coder+)' },
+      { name: 'dashscope', model: 'dashscope/qwen3.5-plus', label: 'DashScope (Qwen 3.5+)' },
       { name: 'openrouter', model: 'openrouter/anthropic/claude-sonnet-4', label: 'OpenRouter (Claude Sonnet)' },
       { name: 'moonshot', model: 'moonshot/kimi-k2.5', label: 'Moonshot (Kimi K2.5)' },
       { name: 'groq', model: 'groq/llama-3.3-70b-versatile', label: 'Groq (Llama 3.3 70B)' },

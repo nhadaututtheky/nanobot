@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict
-from pathlib import Path
 from typing import Any
 
-from nanobot.cron.types import CronPayload, CronSchedule
+from nanobot.cron.types import CronSchedule
 from nanobot.gateway.connection import ClientConnection
 from nanobot.gateway.context import GatewayContext
 from nanobot.gateway.protocol import GatewayError
@@ -70,7 +69,7 @@ async def handle_cron_add(ctx: GatewayContext, conn: ClientConnection, params: d
     name = params.get("name", "Untitled Job")
     sched_raw = params.get("schedule", {})
     payload_raw = params.get("payload", {})
-    enabled = params.get("enabled", True)
+    params.get("enabled", True)
     delete_after_run = params.get("deleteAfterRun", False)
 
     schedule = CronSchedule(
@@ -150,7 +149,7 @@ async def handle_cron_runs(ctx: GatewayContext, conn: ClientConnection, params: 
 
     limit = params.get("limit", 50)
     offset = params.get("offset", 0)
-    scope = params.get("scope", "all")
+    params.get("scope", "all")
     filter_id = params.get("id")
     sort_dir = params.get("sortDir", "desc")
     status_filter = params.get("status")

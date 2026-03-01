@@ -7,8 +7,8 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from nanobot.gateway.context import GatewayContext
 from nanobot.gateway.connection import ClientConnection
+from nanobot.gateway.context import GatewayContext
 from nanobot.gateway.protocol import GatewayError
 
 logger = logging.getLogger(__name__)
@@ -90,13 +90,13 @@ async def handle_chat_send(ctx: GatewayContext, conn: ClientConnection, params: 
                 "sessionKey": session_key,
                 "state": "aborted",
             })
-        except Exception as exc:
+        except Exception:
             logger.exception("chat.send error for %s", session_key)
             await ctx.broadcaster.broadcast("chat", {
                 "runId": run_id,
                 "sessionKey": session_key,
                 "state": "error",
-                "error": str(exc),
+                "error": "an internal error occurred while processing the message",
             })
 
     task = asyncio.create_task(_run())

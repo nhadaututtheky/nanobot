@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 DEFAULT_CAPABILITY_REGISTRY: tuple[ModelCapability, ...] = (
     # --- Anthropic ---
     ModelCapability(
-        model="anthropic/claude-opus-4-5",
+        model="anthropic/claude-opus-4-6",
         provider="anthropic",
         capabilities=("reasoning", "coding", "creative", "data_analysis", "general"),
         tier="high",
@@ -26,7 +26,7 @@ DEFAULT_CAPABILITY_REGISTRY: tuple[ModelCapability, ...] = (
         context_window=200_000,
     ),
     ModelCapability(
-        model="anthropic/claude-sonnet-4-5",
+        model="anthropic/claude-sonnet-4-6",
         provider="anthropic",
         capabilities=("coding", "reasoning", "creative", "data_analysis", "general"),
         tier="mid",
@@ -214,8 +214,24 @@ class ModelRouter:
         available: list[ModelCapability] = []
         seen: set[str] = set()
 
+        # Detect providers configured as local proxies (not real API endpoints).
+        # Built-in default models for these providers may not be reachable.
+        local_proxy_providers: set[str] = set()
+        for pname in self._active_providers:
+            p = getattr(self._config.providers, pname, None)
+            if p and p.api_base and any(kw in p.api_base for kw in ("localhost", "127.0.0.1", "0.0.0.0")):
+                local_proxy_providers.add(pname)
+
+        # Track which models were explicitly configured by the user
+        user_configured = {m.model for m in self._config.agents.orchestrator.models}
+
         for mc in self._registry:
             if mc.model in seen:
+                continue
+
+            # Skip built-in default models when their provider is a local proxy
+            # (user-configured models are always included — the user knows what's available)
+            if mc.provider in local_proxy_providers and mc.model not in user_configured:
                 continue
 
             # Direct provider match
@@ -253,21 +269,12 @@ class ModelRouter:
             active_model,
             active_provider,
         )
-        self._registry.insert(
-            0,
+        self._registry.append(
             ModelCapability(
                 model=active_model,
                 provider=active_provider or "auto",
-                capabilities=(
-                    "reasoning",
-                    "coding",
-                    "research",
-                    "creative",
-                    "data_analysis",
-                    "summarization",
-                    "general",
-                ),
-                tier="high",  # treat the user's chosen model as highest priority
+                capabilities=("general",),
+                tier="mid",  # fallback only — user-configured orchestrator models take priority
             ),
         )
 
@@ -281,7 +288,7 @@ class ModelRouter:
         if anthropic.api_key:
             return (
                 ModelCapability(
-                    model="anthropic/claude-opus-4-5",
+                    model="anthropic/claude-opus-4-6",
                     provider="anthropic",
                     capabilities=("reasoning", "coding", "creative", "data_analysis", "general"),
                     tier="high",
@@ -289,7 +296,7 @@ class ModelRouter:
                     cost_output=75.0,
                 ),
                 ModelCapability(
-                    model="anthropic/claude-sonnet-4-5",
+                    model="anthropic/claude-sonnet-4-6",
                     provider="anthropic",
                     capabilities=("coding", "reasoning", "creative", "general"),
                     tier="mid",

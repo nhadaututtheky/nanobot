@@ -10,6 +10,7 @@ import type { GraphSummary, TaskGraph } from '@/types/orchestrator'
 import { GoalInput } from './GoalInput'
 import { SubAgentPanel } from './SubAgentPanel'
 import { OrchestratorSettings } from './OrchestratorSettings'
+import { ModelConfigPanel } from './ModelConfigPanel'
 import { TaskGraphView } from './TaskGraphView'
 import {
   useGraphList,
@@ -180,6 +181,9 @@ export function OrchestratorPage() {
 
         {/* Sub-Agent Configuration */}
         <SubAgentPanel />
+
+        {/* Model configuration */}
+        <ModelConfigPanel />
 
         {/* Telegram integration settings */}
         <OrchestratorSettings />

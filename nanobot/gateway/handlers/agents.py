@@ -39,7 +39,7 @@ async def handle_agents_list(ctx: GatewayContext, conn: ClientConnection, params
 async def handle_agent_identity_get(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:
     """Read IDENTITY.md or SOUL.md from workspace."""
     workspace = ctx.config.workspace_path
-    session_key = params.get("sessionKey")
+    params.get("sessionKey")
 
     # Try IDENTITY.md first, then SOUL.md
     for name in ("IDENTITY.md", "SOUL.md"):

@@ -112,7 +112,7 @@ class AgentLoop:
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._processing_lock = asyncio.Lock()
+        self._session_locks: dict[str, asyncio.Lock] = {}  # Per-session processing locks
         self._register_default_tools()
         self._init_orchestrator()
 
@@ -146,8 +146,10 @@ class AgentLoop:
         """
         from nanobot.providers.litellm_provider import LiteLLMProvider
 
-        # Already LiteLLM? Reuse it.
+        # Already LiteLLM? Reuse it (inject config for per-model routing).
         if isinstance(self.provider, LiteLLMProvider):
+            if not self.provider._config:
+                self.provider._config = self._config
             return self.provider
 
         # Build a new LiteLLM provider from config
@@ -161,6 +163,7 @@ class AgentLoop:
             default_model=model,
             extra_headers=p.extra_headers if p else None,
             provider_name=provider_name,
+            config=self._config,
         )
 
     def _init_orchestrator(self) -> None:
@@ -247,12 +250,12 @@ class AgentLoop:
             await self._mcp_stack.__aenter__()
             await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
             self._mcp_connected = True
-        except Exception as e:
+        except BaseException as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
                 try:
                     await self._mcp_stack.aclose()
-                except Exception:
+                except BaseException:
                     pass
                 self._mcp_stack = None
         finally:
@@ -368,7 +371,10 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
-        await self._connect_mcp()
+        try:
+            await self._connect_mcp()
+        except BaseException as e:
+            logger.error("MCP connection failed at startup: {} — continuing without MCP", e)
         logger.info("Agent loop started")
 
         while self._running:
@@ -387,13 +393,18 @@ class AgentLoop:
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
-                task.add_done_callback(
-                    lambda t, k=msg.session_key: (
-                        self._active_tasks.get(k, []) and self._active_tasks[k].remove(t)
-                        if t in self._active_tasks.get(k, [])
-                        else None
-                    )
-                )
+
+                def _cleanup_task(t: asyncio.Task, k: str = msg.session_key) -> None:
+                    tasks = self._active_tasks.get(k)
+                    if tasks is not None:
+                        try:
+                            tasks.remove(t)
+                        except ValueError:
+                            pass
+                        if not tasks:
+                            del self._active_tasks[k]
+
+                task.add_done_callback(_cleanup_task)
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
@@ -415,9 +426,18 @@ class AgentLoop:
             )
         )
 
+    def _get_session_lock(self, session_key: str) -> asyncio.Lock:
+        """Get or create a per-session processing lock."""
+        lock = self._session_locks.get(session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_key] = lock
+        return lock
+
     async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message under the global lock."""
-        async with self._processing_lock:
+        """Process a message under a per-session lock (not global)."""
+        lock = self._get_session_lock(msg.session_key)
+        async with lock:
             try:
                 response = await self._process_message(msg)
                 if response is not None:
@@ -580,7 +600,13 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=self.memory_window)
+        # Per-channel history limit override (e.g. Telegram per-group config)
+        effective_history_limit = (
+            msg.metadata.get("history_limit", self.memory_window)
+            if msg.metadata
+            else self.memory_window
+        )
+        history = session.get_history(max_messages=effective_history_limit)
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
@@ -588,6 +614,15 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
+
+        # Per-channel system prompt override (e.g. Telegram per-group system_prompt)
+        if msg.metadata and msg.metadata.get("system_prompt_override"):
+            override = msg.metadata["system_prompt_override"]
+            if initial_messages and initial_messages[0].get("role") == "system":
+                initial_messages[0] = {
+                    **initial_messages[0],
+                    "content": initial_messages[0]["content"] + f"\n\n{override}",
+                }
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})

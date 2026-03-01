@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Coroutine
+from typing import Any, Awaitable, Callable
 
 from .connection import ClientConnection
 from .context import GatewayContext
@@ -12,7 +12,7 @@ from .protocol import GatewayError, RequestFrame
 logger = logging.getLogger(__name__)
 
 # Handler signature: (ctx, conn, params) -> Any
-HandlerFn = Callable[[GatewayContext, ClientConnection, dict[str, Any]], Coroutine[Any, Any, Any]]
+HandlerFn = Callable[[GatewayContext, ClientConnection, dict[str, Any]], Awaitable[Any]]
 
 
 class Dispatcher:
@@ -49,6 +49,6 @@ class Dispatcher:
             await conn.send_response(req.id, result)
         except GatewayError as exc:
             await conn.send_error(req.id, exc.code, str(exc), exc.details)
-        except Exception as exc:
+        except Exception:
             logger.exception("handler error for %s", req.method)
-            await conn.send_error(req.id, "INTERNAL", str(exc))
+            await conn.send_error(req.id, "INTERNAL", "an internal error occurred")
