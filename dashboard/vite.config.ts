@@ -17,6 +17,11 @@ export default defineConfig({
         target: 'ws://localhost:18790',
         ws: true,
       },
+      '/ai-gateway': {
+        target: 'http://localhost:8317/v0/management',
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/ai-gateway/, ''),
+      },
     },
   },
   build: {

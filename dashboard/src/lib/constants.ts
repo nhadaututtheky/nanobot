@@ -32,3 +32,10 @@ export const NAV_ITEMS = [
   { path: '/cron', label: 'Cron', icon: 'Clock' },
   { path: '/analytics', label: 'Analytics', icon: 'BarChart3' },
 ] as const
+
+// AI Gateway (CLIProxyAPI-compatible management API)
+export const GATEWAY_MGMT_URL_KEY = 'gateway_mgmt_url'
+export const GATEWAY_DEFAULT_MGMT = '/ai-gateway'
+export const GATEWAY_TIMEOUT_MS = 8000
+export const GATEWAY_POLL_INTERVAL_MS = 2000
+export const GATEWAY_MAX_POLL_ATTEMPTS = 90 // 3 min at 2s intervals

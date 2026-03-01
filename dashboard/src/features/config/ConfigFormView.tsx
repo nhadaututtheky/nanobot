@@ -7,14 +7,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
-import { NineRouterSection } from './NineRouterSection'
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Router, ArrowRight } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type ConfigValue = string | number | boolean | Record<string, ConfigValue> | ConfigValue[]
+type ConfigValue = string | number | boolean | Record<string, unknown> | unknown[]
 
 interface ConfigFormViewProps {
   config: Record<string, ConfigValue>
@@ -159,14 +160,6 @@ function SectionCard({ sectionKey, data, onChange }: SectionCardProps) {
 
 export function ConfigFormView({ config, onChange }: ConfigFormViewProps) {
   const { reset } = useForm()
-  const [nineRouterEndpoint, setNineRouterEndpoint] = useState(
-    () => {
-      const providers = config['providers'] as Record<string, ConfigValue> | undefined
-      const ninerouter = providers?.['ninerouter'] as Record<string, ConfigValue> | undefined
-      return String(ninerouter?.['endpoint'] ?? 'http://localhost:20128/v1')
-    }
-  )
-
   useEffect(() => {
     reset()
   }, [config, reset])
@@ -179,19 +172,6 @@ export function ConfigFormView({ config, onChange }: ConfigFormViewProps) {
     onChange({ ...config, [sectionKey]: patch })
   }
 
-  function handleNineRouterEndpoint(endpoint: string) {
-    setNineRouterEndpoint(endpoint)
-    const providers = (config['providers'] as Record<string, ConfigValue>) ?? {}
-    const ninerouter = (providers['ninerouter'] as Record<string, ConfigValue>) ?? {}
-    onChange({
-      ...config,
-      providers: {
-        ...providers,
-        ninerouter: { ...ninerouter, endpoint },
-      },
-    })
-  }
-
   return (
     <div className="space-y-4">
       {topLevelSections.map(([key, data]) => (
@@ -202,10 +182,21 @@ export function ConfigFormView({ config, onChange }: ConfigFormViewProps) {
           onChange={(patch) => handleSectionChange(key, patch)}
         />
       ))}
-      <NineRouterSection
-        endpoint={nineRouterEndpoint}
-        onEndpointChange={handleNineRouterEndpoint}
-      />
+      <Card>
+        <CardContent className="flex items-center gap-3 py-4">
+          <Router className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">
+            AI Gateway provider connections are managed separately.
+          </span>
+          <Link
+            to="/providers"
+            className="ml-auto flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+          >
+            Manage Providers
+            <ArrowRight className="h-3 w-3" />
+          </Link>
+        </CardContent>
+      </Card>
     </div>
   )
 }

@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   Settings,
+  Router,
   Clock,
   BarChart3,
   Bot,
@@ -13,6 +14,7 @@ const navItems = [
   { path: '/', label: 'Overview', icon: LayoutDashboard },
   { path: '/chat', label: 'Chat', icon: MessageSquare },
   { path: '/config', label: 'Config', icon: Settings },
+  { path: '/providers', label: 'Providers', icon: Router },
   { path: '/cron', label: 'Cron', icon: Clock },
   { path: '/analytics', label: 'Analytics', icon: BarChart3 },
 ]

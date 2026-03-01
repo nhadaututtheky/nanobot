@@ -3,7 +3,7 @@ import { ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { rpc } from '@/ws/rpc'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+// Button import removed — unused
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatCompact, formatRelativeTime } from '@/lib/utils'
 

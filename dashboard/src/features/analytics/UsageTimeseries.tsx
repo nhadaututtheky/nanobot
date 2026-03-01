@@ -140,7 +140,7 @@ export function UsageTimeseries({ sessionKeys }: UsageTimeseriesProps) {
                   fontSize: 12,
                   color: 'var(--card-foreground)',
                 }}
-                formatter={(value: number) => [formatCompact(value), 'Tokens']}
+                formatter={(value: number | undefined) => [formatCompact(value ?? 0), 'Tokens']}
               />
               <Area
                 type="monotone"

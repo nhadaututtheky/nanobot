@@ -38,7 +38,7 @@ interface ChannelInfo {
 export function ChannelsGrid() {
   const { data, isLoading } = useQuery({
     queryKey: ['channels-status'],
-    queryFn: () => rpc.channels.channelsStatus(),
+    queryFn: () => rpc.channels.status(),
     refetchInterval: 30_000,
   })
 

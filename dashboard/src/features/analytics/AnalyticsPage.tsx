@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { BarChart3, Coins, MessageSquare, Activity } from 'lucide-react'
+import { BarChart3, Coins, MessageSquare } from 'lucide-react'
 import { rpc } from '@/ws/rpc'
 import { PageHeader } from '@/components/common/PageHeader'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'

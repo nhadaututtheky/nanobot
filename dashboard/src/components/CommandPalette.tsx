@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   Settings,
+  Router,
   Clock,
   BarChart3,
   Sun,
@@ -23,6 +24,7 @@ const pages = [
   { label: 'Overview', path: '/', icon: LayoutDashboard },
   { label: 'Chat', path: '/chat', icon: MessageSquare },
   { label: 'Config', path: '/config', icon: Settings },
+  { label: 'Providers', path: '/providers', icon: Router },
   { label: 'Cron Jobs', path: '/cron', icon: Clock },
   { label: 'Analytics', path: '/analytics', icon: BarChart3 },
 ]
