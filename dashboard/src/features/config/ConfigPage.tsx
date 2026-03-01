@@ -61,7 +61,11 @@ export function ConfigPage() {
         patch = formConfig ?? {}
       }
 
-      await rpc.config.set({ patch: patch as Record<string, unknown> })
+      const rawRes = await rpc.config.get() as { raw?: string; hash?: string }
+      await rpc.config.set({
+        raw: JSON.stringify(patch, null, 2),
+        baseHash: rawRes.hash,
+      })
       if (apply) {
         await rpc.config.apply()
       }

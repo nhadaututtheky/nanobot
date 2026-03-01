@@ -115,10 +115,8 @@ export function ActiveProviderPanel() {
       defaults.model = newModel
 
       await rpc.config.set({
-        patch: {
-          raw: JSON.stringify(parsed, null, 2),
-          baseHash: currentHash,
-        } as unknown as Record<string, unknown>,
+        raw: JSON.stringify(parsed, null, 2),
+        baseHash: currentHash,
       })
     },
     onSuccess: () => {

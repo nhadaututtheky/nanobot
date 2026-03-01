@@ -122,7 +122,7 @@ export function ApiKeyGrid() {
         delete provs[patch.provider]
       }
 
-      await rpc.config.set({ patch: { raw: JSON.stringify(parsed, null, 2), baseHash: currentHash } as unknown as Record<string, unknown> })
+      await rpc.config.set({ raw: JSON.stringify(parsed, null, 2), baseHash: currentHash })
     },
     onSuccess: () => {
       toast.success('API key saved')

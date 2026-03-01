@@ -103,8 +103,8 @@ export const rpc = {
     schema: () =>
       call('config.schema'),
 
-    set: (params: { patch: Record<string, unknown> }) =>
-      call('config.set', params as Record<string, unknown>),
+    set: (params: { raw: string; baseHash?: string }) =>
+      call('config.set', params as unknown as Record<string, unknown>),
 
     apply: () =>
       call('config.apply'),
