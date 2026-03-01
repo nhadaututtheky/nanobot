@@ -32,8 +32,17 @@ function resolveProviderInfo(config: Record<string, unknown>): ProviderInfo {
   const model = (defaults?.model as string) ?? 'unknown'
   const provider = (defaults?.provider as string) ?? 'auto'
 
-  // Determine provider type from model name
-  if (model.startsWith('claude-cli/') || provider === 'claude_cli') {
+  // Determine provider type from model name — model prefix takes priority
+  // over stale provider field (user may switch model without clearing provider)
+  const prefix = model.split('/')[0]
+  const isKnownApiPrefix = prefix in {
+    anthropic: 1, openai: 1, deepseek: 1, gemini: 1, dashscope: 1,
+    moonshot: 1, openrouter: 1, groq: 1, zhipu: 1, minimax: 1,
+    aihubmix: 1, siliconflow: 1, volcengine: 1,
+  }
+
+  // Only treat as CLI if model explicitly starts with claude-cli/
+  if (model.startsWith('claude-cli/')) {
     return {
       model,
       provider,
@@ -42,7 +51,7 @@ function resolveProviderInfo(config: Record<string, unknown>): ProviderInfo {
       toolMode: 'CLI subprocess — tools injected as text prompt, MCP managed by Claude',
     }
   }
-  if (model.startsWith('openai-codex/') || provider === 'openai_codex') {
+  if (model.startsWith('openai-codex/')) {
     return {
       model,
       provider,
@@ -51,7 +60,26 @@ function resolveProviderInfo(config: Record<string, unknown>): ProviderInfo {
       toolMode: 'OAuth API — NanoBot controls tools natively',
     }
   }
-  if (provider === 'custom') {
+  // If model has a known API prefix, it's an API provider regardless of provider field
+  if (isKnownApiPrefix) {
+    /* fall through to API section below */
+  } else if (provider === 'claude_cli') {
+    return {
+      model,
+      provider,
+      providerType: 'cli',
+      label: 'Claude CLI',
+      toolMode: 'CLI subprocess — tools injected as text prompt, MCP managed by Claude',
+    }
+  } else if (provider === 'openai_codex') {
+    return {
+      model,
+      provider,
+      providerType: 'oauth',
+      label: 'OpenAI Codex',
+      toolMode: 'OAuth API — NanoBot controls tools natively',
+    }
+  } else if (provider === 'custom') {
     return {
       model,
       provider,
@@ -60,9 +88,6 @@ function resolveProviderInfo(config: Record<string, unknown>): ProviderInfo {
       toolMode: 'Direct API — NanoBot controls tools natively',
     }
   }
-
-  // API provider via LiteLLM
-  const prefix = model.split('/')[0]
   const LABELS: Record<string, string> = {
     anthropic: 'Anthropic API', openai: 'OpenAI API', deepseek: 'DeepSeek',
     gemini: 'Gemini API', dashscope: 'DashScope', moonshot: 'Moonshot',
@@ -113,6 +138,8 @@ export function ActiveProviderPanel() {
       if (!agents.defaults) agents.defaults = {}
       const defaults = agents.defaults as Record<string, string>
       defaults.model = newModel
+      // Clear provider so it auto-detects from model prefix
+      delete defaults.provider
 
       await rpc.config.set({
         raw: JSON.stringify(parsed, null, 2),
