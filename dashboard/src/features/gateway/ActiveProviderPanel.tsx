@@ -299,15 +299,33 @@ interface SwitchOption {
   group: 'oauth' | 'cli' | 'api' | 'proxy'
 }
 
-// Default models for each OAuth gateway prefix
-const OAUTH_MODELS: Record<string, { model: string; label: string }> = {
-  anthropic: { model: 'cc/claude-sonnet-4-6', label: 'Claude (Subscription)' },
-  codex: { model: 'cx/codex-mini-latest', label: 'Codex (Subscription)' },
-  gemini: { model: 'gc/gemini-2.5-pro', label: 'Gemini CLI (Subscription)' },
-  copilot: { model: 'gh/gpt-4.1', label: 'GitHub Copilot' },
-  iflow: { model: 'if/claude-sonnet-4-6', label: 'iFlow (Free)' },
-  qwen: { model: 'qw/qwen3-coder-plus', label: 'Qwen (Free)' },
-  kiro: { model: 'kr/claude-sonnet-4-6', label: 'Kiro (Free)' },
+// Models for each OAuth gateway prefix (multiple variants per provider)
+const OAUTH_MODELS: Record<string, Array<{ model: string; label: string }>> = {
+  anthropic: [
+    { model: 'cc/claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+    { model: 'cc/claude-opus-4-6', label: 'Claude Opus 4.6' },
+    { model: 'cc/claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+  ],
+  codex: [
+    { model: 'cx/codex-mini-latest', label: 'Codex Mini' },
+  ],
+  gemini: [
+    { model: 'gc/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+    { model: 'gc/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  ],
+  copilot: [
+    { model: 'gh/gpt-4.1', label: 'GPT-4.1' },
+    { model: 'gh/gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+  ],
+  iflow: [
+    { model: 'if/claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  ],
+  qwen: [
+    { model: 'qw/qwen3-coder-plus', label: 'Qwen3 Coder Plus' },
+  ],
+  kiro: [
+    { model: 'kr/claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  ],
 }
 
 function QuickSwitcher({ currentModel, config, oauthProviders, onSwitch, isSwitching }: QuickSwitcherProps) {
@@ -323,39 +341,34 @@ function QuickSwitcher({ currentModel, config, oauthProviders, onSwitch, isSwitc
   const options: SwitchOption[] = useMemo(() => {
     const opts: SwitchOption[] = []
 
-    // OAuth gateway providers — show connected ones first
+    // OAuth gateway providers — show all model variants per connected provider
     for (const oauthProv of oauthProviders) {
-      const oauthModel = OAUTH_MODELS[oauthProv.provider]
-      if (!oauthModel) continue
+      const models = OAUTH_MODELS[oauthProv.provider]
+      if (!models) continue
       const email = oauthProv.authFile?.email ?? oauthProv.authFile?.label
-      opts.push({
-        model: oauthModel.model,
-        label: oauthModel.label + (email ? ` (${email})` : ''),
-        available: oauthProv.connected,
-        reason: oauthProv.connected ? undefined : 'Not connected',
-        group: 'oauth',
-      })
+      const suffix = email ? ` (${email})` : ''
+      for (const m of models) {
+        opts.push({
+          model: m.model,
+          label: m.label + suffix,
+          available: oauthProv.connected,
+          reason: oauthProv.connected ? undefined : 'Not connected',
+          group: 'oauth',
+        })
+      }
     }
 
-    // Claude CLI (always available if claude is installed)
-    opts.push({
-      model: 'claude-cli/sonnet',
-      label: 'Claude CLI (Sonnet)',
-      available: true,
-      group: 'cli',
-    })
-    opts.push({
-      model: 'claude-cli/opus',
-      label: 'Claude CLI (Opus)',
-      available: true,
-      group: 'cli',
-    })
-    opts.push({
-      model: 'claude-cli/haiku',
-      label: 'Claude CLI (Haiku)',
-      available: true,
-      group: 'cli',
-    })
+    // Claude CLI — only show if current model uses claude-cli/ prefix
+    if (currentModel.startsWith('claude-cli/')) {
+      for (const variant of ['sonnet', 'opus', 'haiku'] as const) {
+        opts.push({
+          model: `claude-cli/${variant}`,
+          label: `Claude CLI (${variant.charAt(0).toUpperCase() + variant.slice(1)})`,
+          available: true,
+          group: 'cli',
+        })
+      }
+    }
 
     // API providers — check if key is configured
     const apiProviders: Array<{ name: string; model: string; label: string }> = [
