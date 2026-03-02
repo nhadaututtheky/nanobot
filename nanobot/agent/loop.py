@@ -310,7 +310,8 @@ class AgentLoop:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
 
         def _fmt(tc):
-            val = next(iter(tc.arguments.values()), None) if tc.arguments else None
+            args = tc.arguments if isinstance(tc.arguments, dict) else {}
+            val = next(iter(args.values()), None) if args else None
             if not isinstance(val, str):
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
@@ -685,7 +686,14 @@ class AgentLoop:
             on_progress=on_progress or _bus_progress,
         )
 
-        if final_content is None:
+        # If message tool already sent a response, don't send a duplicate or error
+        message_already_sent = (
+            (mt := self.tools.get("message"))
+            and isinstance(mt, MessageTool)
+            and mt._sent_in_turn
+        )
+
+        if final_content is None and not message_already_sent:
             # Always return a response so channels can stop typing indicators.
             # Returning None caused typing to run forever on Telegram/Discord/etc.
             final_content = (
@@ -695,7 +703,7 @@ class AgentLoop:
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
 
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
+        if message_already_sent:
             return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content

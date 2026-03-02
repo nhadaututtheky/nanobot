@@ -262,10 +262,16 @@ class ClaudeCLIProvider(LLMProvider):
         for match in matches:
             try:
                 data = json.loads(match.group(1).strip())
+                raw_args = data.get("arguments", {})
+                if isinstance(raw_args, str):
+                    try:
+                        raw_args = json.loads(raw_args)
+                    except json.JSONDecodeError:
+                        raw_args = {}
                 tool_calls.append(ToolCallRequest(
                     id=data.get("id", f"call_{uuid.uuid4().hex[:8]}"),
                     name=data["name"],
-                    arguments=data.get("arguments", {}),
+                    arguments=raw_args,
                 ))
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning("[CLAUDE-CLI] Failed to parse tool_call block: {}", e)
@@ -379,12 +385,23 @@ class ClaudeCLIProvider(LLMProvider):
             logger.warning("[CLAUDE-CLI] Non-zero exit: {}", proc.returncode)
 
         logger.info("[CLAUDE-CLI] Got response: {} bytes, exit={}", len(output), proc.returncode)
+        logger.debug("[CLAUDE-CLI] Raw output: {}", repr(output[:500]))
         return self._parse_output(output, has_tools)
 
+    # NDJSON message types emitted by Claude CLI's --print mode
+    _NDJSON_TYPES = frozenset({"assistant", "result", "system", "user"})
+
     def _parse_output(self, output: str, has_tools: bool) -> LLMResponse:
-        """Parse CLI output — handles both NDJSON and plain text."""
+        """Parse CLI output — handles both NDJSON and plain text.
+
+        Claude CLI --print outputs either:
+        1. Plain text (with ```tool_call blocks for NanoBot tools)
+        2. NDJSON lines with {"type": "assistant"/"result", ...}
+
+        Key: real NDJSON always has a "type" field. Tool call JSON inside
+        ```tool_call blocks does NOT — so we use "type" presence to distinguish.
+        """
         text_parts: list[str] = []
-        pre_ndjson_parts: list[str] = []
         cost_usd = 0.0
         num_turns = 0
         is_ndjson = False
@@ -392,26 +409,21 @@ class ClaudeCLIProvider(LLMProvider):
         for line in output.split("\n"):
             stripped = line.strip()
             if not stripped or not stripped.startswith("{"):
-                # Plain text line — might be non-NDJSON output (startup noise)
-                if stripped and not is_ndjson:
-                    pre_ndjson_parts.append(stripped)
                 continue
 
             try:
                 msg = json.loads(stripped)
-                if not is_ndjson:
-                    is_ndjson = True
-                    # Discard pre-NDJSON noise (e.g. Node.js warnings)
-                    if pre_ndjson_parts:
-                        logger.debug("[CLAUDE-CLI] Discarded pre-NDJSON lines: {}",
-                                     pre_ndjson_parts[:3])
-                    pre_ndjson_parts.clear()
             except json.JSONDecodeError:
-                if stripped and not is_ndjson:
-                    pre_ndjson_parts.append(stripped)
                 continue
 
+            # Only treat as NDJSON if it has a recognized "type" field.
+            # This prevents tool_call JSON bodies ({"id","name","arguments"})
+            # from being misidentified as NDJSON metadata.
             msg_type = msg.get("type", "")
+            if msg_type not in self._NDJSON_TYPES:
+                continue
+
+            is_ndjson = True
 
             if msg_type == "assistant":
                 for block in msg.get("message", {}).get("content", []):
@@ -431,8 +443,11 @@ class ClaudeCLIProvider(LLMProvider):
                 if not text_parts and msg.get("result"):
                     text_parts.append(msg["result"])
 
-        # If no NDJSON was found, use raw output as plain text
-        full_text = "\n".join(text_parts).strip() if is_ndjson else output.strip()
+        if is_ndjson:
+            full_text = "\n".join(text_parts).strip()
+        else:
+            # No NDJSON found — entire output is plain text (with tool_call blocks)
+            full_text = output.strip()
         return self._finalize_response(full_text, cost_usd, num_turns, has_tools)
 
     def _finalize_response(

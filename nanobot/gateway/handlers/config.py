@@ -82,6 +82,7 @@ async def handle_config_set(ctx: GatewayContext, conn: ClientConnection, params:
     try:
         new_config = Config.model_validate(json.loads(raw))
         ctx.agent.reload_config(new_config)
+        ctx.config = new_config  # Update gateway context so all handlers see fresh config
     except Exception as exc:
         logger.warning("Config hot-reload failed (will apply on restart): %s", exc)
 

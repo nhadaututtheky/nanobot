@@ -47,6 +47,8 @@ class TelegramGroupConfig(Base):
     require_mention: bool = True  # If false, bot responds to all messages
     system_prompt: str = ""  # Injected system prompt for this group
     allow_from: list[str] = Field(default_factory=list)  # Per-group allowlist
+    ignore_senders: list[str] = Field(default_factory=list)  # Sender name/username prefixes to ignore
+    ignore_patterns: list[str] = Field(default_factory=list)  # Regex patterns on content to ignore
     history_limit: int = 100
 
 
@@ -277,6 +279,8 @@ class TelegramUserbotConfig(Base):
     phone: str = ""
     session_path: str = "~/.nanobot/telegram_userbot"
     observe_groups: list[str] = Field(default_factory=list)  # Chat IDs to observe (empty = all)
+    ignore_senders: list[str] = Field(default_factory=list)  # Sender name/username prefixes to ignore (e.g. ["ray_"])
+    ignore_patterns: list[str] = Field(default_factory=list)  # Regex patterns on content to ignore
 
 
 class ChannelsConfig(Base):
