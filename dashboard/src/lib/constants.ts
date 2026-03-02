@@ -1,4 +1,4 @@
-export const WS_URL = import.meta.env.VITE_WS_URL ?? 'ws://localhost:18790'
+export const WS_URL = import.meta.env.VITE_WS_URL ?? 'ws://127.0.0.1:18790'
 export const PROTOCOL_VERSION = 3
 
 export const CLIENT_INFO = {
