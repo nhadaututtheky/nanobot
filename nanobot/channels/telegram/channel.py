@@ -23,6 +23,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.telegram.formatting import markdown_to_telegram_html, split_message
 from nanobot.channels.telegram.retry import RetryHelper
+from nanobot.channels.telegram.streaming import StreamingManager
 from nanobot.config.schema import TelegramConfig, TelegramGroupConfig
 
 
@@ -60,6 +61,7 @@ class TelegramChannel(BaseChannel):
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task[None]] = {}
         self._retry = RetryHelper(config.retry)
+        self._streaming: StreamingManager | None = None  # Created after app init
         self._webhook_runner: object | None = None  # WebhookRunner (lazy import)
 
     # --- group config resolution ---
@@ -145,6 +147,11 @@ class TelegramChannel(BaseChannel):
             builder = builder.proxy(self.config.proxy).get_updates_proxy(self.config.proxy)
         self._app = builder.build()
         self._app.add_error_handler(self._on_error)
+
+        # Init streaming manager (sendMessageDraft / edit-in-place)
+        self._streaming = StreamingManager(self._app, self.config, self._retry)
+        if self._streaming.enabled:
+            logger.info("Telegram streaming enabled (mode={})", self.config.streaming)
 
         # --- handlers ---
         self._app.add_handler(CommandHandler("start", self._on_start))
@@ -268,8 +275,17 @@ class TelegramChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
-        # Skip progress/intermediate messages — only send final responses
+        # Progress messages → stream via sendMessageDraft or edit-in-place
         if msg.metadata and msg.metadata.get("_progress"):
+            if self._streaming and self._streaming.enabled and msg.content:
+                # Skip tool hints — only stream actual content
+                if not msg.metadata.get("_tool_hint"):
+                    try:
+                        chat_id = int(msg.chat_id)
+                        thread_id = msg.metadata.get("message_thread_id")
+                        await self._streaming.update(chat_id, msg.content, thread_id=thread_id)
+                    except (ValueError, Exception) as e:
+                        logger.debug("Streaming update failed: {}", e)
             return
 
         if not self._app:
@@ -287,6 +303,10 @@ class TelegramChannel(BaseChannel):
         except ValueError:
             logger.error("Invalid chat_id: {}", msg.chat_id)
             return
+
+        # Finalize streaming (delete progress message / clear draft bubble)
+        if self._streaming and self._streaming.enabled:
+            await self._streaming.finalize(chat_id)
 
         reply_params = None
         if self.config.reply_to_message:
