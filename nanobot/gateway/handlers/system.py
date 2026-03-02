@@ -17,8 +17,12 @@ logger = logging.getLogger(__name__)
 async def handle_status(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:
     """Aggregate system status from all services."""
     cron_status = ctx.cron.status()
+    model = ""
+    if ctx.agent and ctx.agent._config:
+        model = ctx.agent._config.agents.defaults.model
     return {
         "agent": {"running": ctx.agent._running},
+        "model": model,
         "channels": {name: True for name in ctx.channels.enabled_channels},
         "cron": cron_status,
         "heartbeat": {"enabled": ctx.heartbeat._enabled if hasattr(ctx.heartbeat, "_enabled") else True},

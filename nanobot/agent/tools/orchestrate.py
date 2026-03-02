@@ -39,11 +39,12 @@ class OrchestrateTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Decompose a complex goal into a task graph and execute it with multiple AI models. "
-            "Use this for multi-step tasks that benefit from parallel execution and model specialization. "
-            "Each subtask is routed to the best available model (e.g., strong model for reasoning, "
-            "fast model for research). Results pass between dependent tasks as context.\n"
-            "The orchestrator runs in the background — you'll be notified when it completes."
+            "Break down an explicitly assigned TASK into subtasks and execute them "
+            "with specialized AI models in parallel.\n"
+            "Use ONLY when a user assigns you concrete work that requires multiple "
+            "distinct subtasks (e.g., 'research X, then code Y, then review Z').\n\n"
+            "NEVER use for chat, conversation, questions, greetings, or anything "
+            "you can answer directly by writing text."
         )
 
     @property

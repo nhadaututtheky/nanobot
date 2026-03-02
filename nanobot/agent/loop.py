@@ -109,6 +109,7 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
+        self.on_mcp_ready: Any = None  # Callback: async fn(ToolRegistry)
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
@@ -154,15 +155,21 @@ class AgentLoop:
             return self.provider
 
         # Build a new LiteLLM provider from config
+        from nanobot.config.schema import ProviderConfig
+
         model = self._config.agents.defaults.model
         p = self._config.get_provider(model)
         provider_name = self._config.get_provider_name(model)
 
+        # get_provider() may return ClaudeCLIConfig (no api_key) — guard with isinstance
+        api_key = p.api_key if isinstance(p, ProviderConfig) else None
+        extra_headers = p.extra_headers if isinstance(p, ProviderConfig) else None
+
         return LiteLLMProvider(
-            api_key=p.api_key if p else None,
+            api_key=api_key,
             api_base=self._config.get_api_base(model),
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
+            extra_headers=extra_headers,
             provider_name=provider_name,
             config=self._config,
         )
@@ -396,6 +403,8 @@ class AgentLoop:
         self._running = True
         try:
             await self._connect_mcp()
+            if self._mcp_connected and self.on_mcp_ready:
+                await self.on_mcp_ready(self.tools)
         except BaseException as e:
             logger.error("MCP connection failed at startup: {} — continuing without MCP", e)
         logger.info("Agent loop started")
@@ -476,18 +485,29 @@ class AgentLoop:
                     )
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
+                # Publish empty message so channels can stop typing indicators
+                await self.bus.publish_outbound(
+                    OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="Task was cancelled.",
+                        metadata=msg.metadata or {},
+                    )
+                )
                 raise
             except Exception:
                 logger.exception("Error processing message for session {}", msg.session_key)
-                # Only send error to CLI, silently fail on channels (no spam in groups)
-                if msg.channel == "cli":
-                    await self.bus.publish_outbound(
-                        OutboundMessage(
-                            channel=msg.channel,
-                            chat_id=msg.chat_id,
-                            content="Sorry, I encountered an error.",
-                        )
+                # Always send an error response so channels can stop typing indicators
+                await self.bus.publish_outbound(
+                    OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="Sorry, I encountered an error processing your message."
+                        if msg.channel == "cli"
+                        else "Sorry, something went wrong. Please try again.",
+                        metadata=msg.metadata or {},
                     )
+                )
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""
@@ -666,14 +686,11 @@ class AgentLoop:
         )
 
         if final_content is None:
-            # Don't send a generic fallback on channels — it's noise.
-            # CLI gets feedback; channels stay silent (agent will retry on next user message).
-            if msg.channel == "cli":
-                final_content = (
-                    "LLM did not return a response. This may be a temporary issue — try again."
-                )
-            else:
-                return None
+            # Always return a response so channels can stop typing indicators.
+            # Returning None caused typing to run forever on Telegram/Discord/etc.
+            final_content = (
+                "LLM did not return a response. This may be a temporary issue — try again."
+            )
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)

@@ -283,30 +283,44 @@ class ModelRouter:
     def _discover_proxy_models(self) -> list[ModelCapability]:
         """Query CLI Proxy API /v1/models to discover available models at startup.
 
-        Tries proxy_url first (port 20128), falls back to management host /v1/models.
+        Tries management host (port 8317) first, then proxy_url (port 20128).
+        Sends API key from the openai provider config (which points to CLI Proxy API).
         Returns empty list on failure (graceful — proxy may not be running).
         """
         ai_gw = self._config.gateway.ai_gateway
-        if not ai_gw.proxy_url:
+        if not ai_gw.proxy_url and not ai_gw.management_url:
             return []
+
+        # Resolve API key: prefer explicit ai_gateway.api_key, fallback to provider key
+        api_key = ai_gw.api_key
+        if not api_key:
+            ai_gw_base = ai_gw.proxy_url.rstrip("/") if ai_gw.proxy_url else ""
+            for pname in ("openai", "anthropic", "deepseek", "gemini"):
+                p = getattr(self._config.providers, pname, None)
+                if not p or not p.api_base or not p.api_key:
+                    continue
+                if ai_gw_base and p.api_base.rstrip("/") == ai_gw_base:
+                    api_key = p.api_key
+                    break
 
         # Build lookup from built-in registry for capability/tier matching
         builtin_lookup: dict[str, ModelCapability] = {}
         for mc in DEFAULT_CAPABILITY_REGISTRY:
-            # Key by short model name: "claude-opus-4-6", "gpt-4.1", etc.
             short = mc.model.split("/", 1)[-1] if "/" in mc.model else mc.model
             builtin_lookup[short] = mc
 
-        urls_to_try = [ai_gw.proxy_url.rstrip("/") + "/models"]
-        # Also try management host (same host, different port) as fallback
+        # Try management host first (more reliable), then proxy port
+        urls_to_try: list[str] = []
         if ai_gw.management_url:
             mgmt_base = ai_gw.management_url.rsplit("/v0", 1)[0]
-            mgmt_models = mgmt_base + "/v1/models"
-            if mgmt_models not in urls_to_try:
-                urls_to_try.append(mgmt_models)
+            urls_to_try.append(mgmt_base + "/v1/models")
+        if ai_gw.proxy_url:
+            proxy_models = ai_gw.proxy_url.rstrip("/") + "/models"
+            if proxy_models not in urls_to_try:
+                urls_to_try.append(proxy_models)
 
         for url in urls_to_try:
-            models = self._fetch_models_from_url(url, builtin_lookup)
+            models = self._fetch_models_from_url(url, builtin_lookup, api_key)
             if models:
                 logger.info("Discovered {} model(s) from CLI Proxy API ({})", len(models), url)
                 return models
@@ -315,12 +329,14 @@ class ModelRouter:
         return []
 
     def _fetch_models_from_url(
-        self, url: str, builtin_lookup: dict[str, ModelCapability],
+        self, url: str, builtin_lookup: dict[str, ModelCapability], api_key: str = "",
     ) -> list[ModelCapability]:
         """Fetch and parse /v1/models response from a URL."""
         try:
             req = urllib.request.Request(url, method="GET")
             req.add_header("Accept", "application/json")
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except Exception:
@@ -345,6 +361,12 @@ class ModelRouter:
             stripped = short.split("/", 1)[-1] if "/" in short else short
 
             builtin = builtin_lookup.get(stripped) or builtin_lookup.get(short)
+
+            # Skip if this model already exists in built-in registry (avoid dupes like
+            # anthropic/claude-sonnet-4-6 + openai/cc/claude-sonnet-4-6)
+            if builtin and builtin.model not in seen:
+                seen.add(builtin.model)
+                continue
 
             # Build the model name with openai/cc/ prefix for LiteLLM routing
             full_model = f"openai/cc/{stripped}" if "/" not in model_id else model_id

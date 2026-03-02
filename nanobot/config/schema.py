@@ -58,6 +58,23 @@ class TelegramActionsConfig(Base):
     set_reaction: bool = True
 
 
+class TelegramTeamGroupConfig(Base):
+    """Config for a multi-bot team group where sub-agent bots act as team members."""
+
+    enabled: bool = True
+    chat_id: str = ""  # Telegram group chat ID
+    roles: list[str] = Field(default_factory=list)  # Which roles participate (empty = all with tokens)
+    coordinator_role: str = "general"  # Role that always responds to direct mentions
+    relevance_model: str = ""  # Model for relevance check (empty = cheapest available)
+    relevance_threshold: float = 0.6  # 0-1, how confident a role must be to speak
+    max_concurrent_responses: int = 2  # Max roles responding to same message simultaneously
+    cooldown_s: float = 10.0  # Min seconds between unsolicited responses per role
+    dedup_window_s: float = 5.0  # Window to prevent duplicate responses to same message
+
+    # Safety: allowlisted Telegram user IDs (empty = allow all — NOT recommended for exec)
+    allowed_user_ids: list[str] = Field(default_factory=list)
+
+
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
@@ -94,6 +111,9 @@ class TelegramConfig(Base):
     allowed_updates: list[str] = Field(
         default_factory=lambda: ["message", "edited_message", "callback_query", "message_reaction"]
     )
+
+    # --- Multi-bot team groups ---
+    team_groups: dict[str, TelegramTeamGroupConfig] = Field(default_factory=dict)
 
 
 class FeishuConfig(Base):
@@ -315,6 +335,10 @@ class SubAgentRoleConfig(Base):
     # Telegram identity (optional, for orchestrator multi-bot)
     telegram_bot_token: str = ""  # Bot token for this role (empty = use main bot)
 
+    # Team tool permissions (empty = all tools allowed)
+    allowed_tools: list[str] = Field(default_factory=list)  # Whitelist: ["nmem_*", "web_search", "exec"]
+    denied_tools: list[str] = Field(default_factory=list)  # Blacklist: ["exec", "write_file"]
+
 
 BUILTIN_ROLES: dict[str, dict] = {
     "general": {
@@ -513,6 +537,7 @@ class AiGatewayConfig(Base):
     config_path: str = ""  # Path to config.yaml (auto-created if missing)
     management_url: str = "http://localhost:8317/v0/management"
     proxy_url: str = "http://localhost:20128/v1"
+    api_key: str = ""  # API key for CLI Proxy API (from config.yaml api-keys list)
     auto_start: bool = False  # Start AI Gateway automatically with NanoBot
 
 
@@ -601,6 +626,8 @@ class Config(BaseSettings):
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
+            if not isinstance(p, ProviderConfig):
+                continue
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_direct or p.api_key:
                     return p, spec.name
@@ -608,6 +635,8 @@ class Config(BaseSettings):
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
+            if not isinstance(p, ProviderConfig):
+                continue
             if p and any(_kw_matches(kw) for kw in spec.keywords):
                 if spec.is_oauth or spec.is_direct or p.api_key:
                     return p, spec.name
@@ -618,6 +647,8 @@ class Config(BaseSettings):
             if spec.is_oauth or spec.is_direct:
                 continue
             p = getattr(self.providers, spec.name, None)
+            if not isinstance(p, ProviderConfig):
+                continue
             if p and p.api_key:
                 return p, spec.name
         return None, None

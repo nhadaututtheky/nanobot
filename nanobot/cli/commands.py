@@ -164,6 +164,7 @@ def _make_provider(config: Config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
+        config=config,
     )
 
 
@@ -247,7 +248,12 @@ def gateway(
     cron.on_job = on_cron_job
 
     # Create channel manager
-    channels = ChannelManager(config, bus)
+    channels = ChannelManager(config, bus, provider=provider)
+
+    # Wire tool registry to team agents after MCP connects
+    async def _on_mcp_ready(tools):
+        channels.set_tool_registry(tools)
+    agent_loop.on_mcp_ready = _on_mcp_ready
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         enabled = set(channels.enabled_channels)

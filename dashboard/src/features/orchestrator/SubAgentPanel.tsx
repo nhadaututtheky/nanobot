@@ -1,7 +1,9 @@
+import { useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { rpc } from '@/ws/rpc'
+import { useEvent } from '@/ws/provider'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
@@ -70,6 +72,15 @@ export function SubAgentPanel() {
   })
   const activeModel = (statusData?.model as string) ?? ''
 
+  // Auto-refresh when config changes (from other clients or config.apply)
+  useEvent(
+    'config',
+    useCallback(() => {
+      void queryClient.invalidateQueries({ queryKey: ['config', 'get'] })
+      void queryClient.invalidateQueries({ queryKey: ['subagent', 'config'] })
+    }, [queryClient]),
+  )
+
   const config: SubAgentConfig = subagentConfig ?? {
     enabled: true,
     defaultMaxIterations: 15,
@@ -108,12 +119,15 @@ export function SubAgentPanel() {
         ...fullConfig,
         agents: { ...agents, subagent: updated },
       }
-      await rpc.config.set({
+      const result = await rpc.config.set({
         raw: JSON.stringify(updatedConfig, null, 2),
         baseHash: configData.hash,
       })
-      queryClient.invalidateQueries({ queryKey: ['config', 'get'] })
-      queryClient.invalidateQueries({ queryKey: ['subagent', 'config'] })
+      // Update config hash immediately so next save uses correct baseHash
+      queryClient.setQueryData(['config', 'get'], (old: ConfigData | undefined) =>
+        old ? { ...old, raw: JSON.stringify(updatedConfig, null, 2), hash: (result as { hash: string }).hash } : old,
+      )
+      await queryClient.invalidateQueries({ queryKey: ['subagent', 'config'] })
       toast.success('Sub-agent config saved')
     } catch (err) {
       toast.error(`Save failed: ${err instanceof Error ? err.message : 'unknown'}`)

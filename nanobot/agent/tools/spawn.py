@@ -42,9 +42,11 @@ class SpawnTool(Tool):
     def description(self) -> str:
         roles_desc = self._get_roles_description()
         return (
-            "Spawn a subagent to handle a task in the background. "
-            "Use this for complex or time-consuming tasks that can run independently. "
-            "The subagent will complete the task and report back when done.\n"
+            "Spawn a background subagent for an explicitly assigned TASK. "
+            "Use when a user gives you a concrete job that a specialized role can handle "
+            "(e.g., research, code writing, code review).\n"
+            "NEVER use for chat, conversation, questions, or greetings — "
+            "just reply with text for those.\n"
             f"Available roles:\n{roles_desc}"
         )
 

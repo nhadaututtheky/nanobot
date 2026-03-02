@@ -2,4 +2,6 @@
 
 from nanobot.channels.telegram.channel import TelegramChannel
 
-__all__ = ["TelegramChannel"]
+__all__ = [
+    "TelegramChannel",
+]

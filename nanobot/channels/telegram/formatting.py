@@ -5,10 +5,45 @@ from __future__ import annotations
 import re
 
 
+def _looks_like_html(text: str) -> bool:
+    """Check if text already contains Telegram HTML tags."""
+    return bool(re.search(r"</?(?:b|i|u|s|code|pre|a|tg-spoiler|blockquote)\b", text))
+
+
+def _sanitize_html(text: str) -> str:
+    """Escape non-Telegram HTML tags while preserving allowed ones."""
+    # Telegram allowed tags
+    allowed = r"(?:b|i|u|s|code|pre|a|tg-spoiler|blockquote|tg-emoji)"
+    # Protect allowed tags
+    protected: list[str] = []
+
+    def save_tag(m: re.Match[str]) -> str:
+        protected.append(m.group(0))
+        return f"\x00TG{len(protected) - 1}\x00"
+
+    text = re.sub(rf"</?{allowed}(?:\s[^>]*)?>", save_tag, text)
+
+    # Escape everything else
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    # Restore allowed tags
+    for i, tag in enumerate(protected):
+        text = text.replace(f"\x00TG{i}\x00", tag)
+
+    return text
+
+
 def markdown_to_telegram_html(text: str) -> str:
-    """Convert markdown to Telegram-safe HTML."""
+    """Convert markdown to Telegram-safe HTML.
+
+    If the text already contains Telegram HTML tags, sanitize and pass through.
+    """
     if not text:
         return ""
+
+    # If LLM already output HTML, just sanitize non-Telegram tags and return
+    if _looks_like_html(text):
+        return _sanitize_html(text)
 
     # 1. Extract and protect code blocks (preserve content from other processing)
     code_blocks: list[str] = []

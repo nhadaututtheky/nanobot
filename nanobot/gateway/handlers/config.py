@@ -63,7 +63,11 @@ async def _validate_and_save(ctx: GatewayContext, raw: str, base_hash: str | Non
 
 
 async def handle_config_set(ctx: GatewayContext, conn: ClientConnection, params: dict[str, Any]) -> Any:
-    """Save config and trigger reconnect via 1012 close."""
+    """Save config and hot-reload into running components.
+
+    Unlike config.apply, this does NOT close WebSocket connections.
+    The UI stays connected and can immediately re-fetch fresh data.
+    """
     raw = params.get("raw")
     if not isinstance(raw, str):
         raise GatewayError("INVALID_PARAMS", "raw config text required")
@@ -81,12 +85,8 @@ async def handle_config_set(ctx: GatewayContext, conn: ClientConnection, params:
     except Exception as exc:
         logger.warning("Config hot-reload failed (will apply on restart): %s", exc)
 
-    # Close all clients with 1012 (service restart) — UI handles graceful reconnect
-    # Note: response is sent by dispatcher before this, since we return first
-    import asyncio
-    asyncio.get_running_loop().call_soon(
-        lambda: asyncio.create_task(ctx.broadcaster.close_all(code=1012, reason="config changed"))
-    )
+    # Broadcast config-changed event so all clients can re-fetch (no WS disconnect)
+    await ctx.broadcaster.broadcast("config", {"action": "changed", "hash": new_hash})
 
     return {"hash": new_hash}
 

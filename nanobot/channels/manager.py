@@ -22,10 +22,12 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(self, config: Config, bus: MessageBus, provider: Any = None):
         self.config = config
         self.bus = bus
+        self._provider = provider
         self.channels: dict[str, BaseChannel] = {}
+        self._team_managers: list[Any] = []  # TelegramTeamManager instances
         self._dispatch_task: asyncio.Task | None = None
 
         self._init_channels()
@@ -159,6 +161,80 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # Telegram multi-bot team groups
+        self._init_telegram_teams()
+
+    def _make_team_provider(self) -> Any:
+        """Create a LiteLLMProvider for team bots (multi-model routing)."""
+        from nanobot.providers.litellm_provider import LiteLLMProvider
+
+        # Team bots need LiteLLMProvider to route different models per role.
+        # The main provider may be ClaudeCLIProvider which can't do that.
+        model = self.config.agents.defaults.model
+        p = self.config.get_provider(model)
+        return LiteLLMProvider(
+            api_key=p.api_key if p else None,
+            api_base=self.config.get_api_base(model) if p else None,
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            config=self.config,
+        )
+
+    def _init_telegram_teams(self) -> None:
+        """Initialize multi-bot team groups."""
+        team_groups = self.config.channels.telegram.team_groups
+        if not team_groups:
+            return
+
+        try:
+            from pathlib import Path
+
+            from nanobot.channels.telegram.team_agent import TeamRoleAgent
+            from nanobot.channels.telegram.team_manager import TelegramTeamManager
+
+            team_provider = self._make_team_provider()
+            workspace = Path(self.config.agents.defaults.workspace).expanduser()
+
+            for label, group_cfg in team_groups.items():
+                if not group_cfg.enabled or not group_cfg.chat_id:
+                    continue
+
+                manager = TelegramTeamManager(
+                    group_config=group_cfg,
+                    config=self.config,
+                    provider=team_provider,
+                )
+
+                if not manager.bots:
+                    continue
+
+                # Create per-role agents
+                effective_roles = self.config.agents.subagent.get_effective_roles()
+                agents: dict[str, TeamRoleAgent] = {}
+                for role_name in manager.bots:
+                    role_cfg = effective_roles.get(role_name)
+                    if role_cfg:
+                        agents[role_name] = TeamRoleAgent(
+                            role=role_name,
+                            role_config=role_cfg,
+                            provider=team_provider,
+                            workspace=workspace,
+                            config=self.config,
+                            group_config=group_cfg,
+                        )
+                manager.set_agents(agents)
+
+                self._team_managers.append(manager)
+                logger.info(
+                    "Telegram team '{}' enabled ({} bots for group {})",
+                    label, len(manager.bots), group_cfg.chat_id,
+                )
+
+        except ImportError as e:
+            logger.warning("Telegram team not available: {}", e)
+        except Exception as e:
+            logger.error("Failed to init Telegram teams: {}", e)
+
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
         try:
@@ -167,8 +243,8 @@ class ChannelManager:
             logger.error("Failed to start channel {}: {}", name, e)
 
     async def start_all(self) -> None:
-        """Start all channels and the outbound dispatcher."""
-        if not self.channels:
+        """Start all channels, team managers, and the outbound dispatcher."""
+        if not self.channels and not self._team_managers:
             logger.warning("No channels enabled")
             return
 
@@ -181,11 +257,22 @@ class ChannelManager:
             logger.info("Starting {} channel...", name)
             tasks.append(asyncio.create_task(self._start_channel(name, channel)))
 
+        # Start team managers
+        for tm in self._team_managers:
+            tasks.append(asyncio.create_task(self._start_team(tm)))
+
         # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    async def _start_team(self, tm: Any) -> None:
+        """Start a team manager and log any exceptions."""
+        try:
+            await tm.start()
+        except Exception as e:
+            logger.error("Failed to start Telegram team: {}", e)
+
     async def stop_all(self) -> None:
-        """Stop all channels and the dispatcher."""
+        """Stop all channels, team managers, and the dispatcher."""
         logger.info("Stopping all channels...")
 
         # Stop dispatcher
@@ -195,6 +282,13 @@ class ChannelManager:
                 await self._dispatch_task
             except asyncio.CancelledError:
                 pass
+
+        # Stop team managers
+        for tm in self._team_managers:
+            try:
+                await tm.stop()
+            except Exception as e:
+                logger.error("Error stopping Telegram team: {}", e)
 
         # Stop all channels
         for name, channel in self.channels.items():
@@ -248,6 +342,14 @@ class ChannelManager:
             }
             for name, channel in self.channels.items()
         }
+
+    def set_tool_registry(self, tools: Any) -> None:
+        """Share a ToolRegistry with team agents (called after MCP connected)."""
+        for tm in self._team_managers:
+            for agent in tm.agents.values():
+                agent.set_tool_registry(tools)
+        if self._team_managers:
+            logger.info("Team agents: tool registry wired ({} tools)", len(tools.get_definitions()))
 
     @property
     def enabled_channels(self) -> list[str]:

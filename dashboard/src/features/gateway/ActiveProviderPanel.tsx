@@ -296,7 +296,7 @@ interface SwitchOption {
   label: string
   available: boolean
   reason?: string
-  group: 'oauth' | 'cli' | 'api'
+  group: 'oauth' | 'cli' | 'api' | 'proxy'
 }
 
 // Default models for each OAuth gateway prefix
@@ -312,6 +312,13 @@ const OAUTH_MODELS: Record<string, { model: string; label: string }> = {
 
 function QuickSwitcher({ currentModel, config, oauthProviders, onSwitch, isSwitching }: QuickSwitcherProps) {
   const providers = config?.providers as Record<string, Record<string, string>> | undefined
+
+  // Fetch proxy models from orchestrator for CLI Proxy API models
+  const { data: modelsData } = useQuery({
+    queryKey: ['orchestrator', 'models'],
+    queryFn: () => rpc.orchestrator.models(),
+    staleTime: 60_000,
+  })
 
   const options: SwitchOption[] = useMemo(() => {
     const opts: SwitchOption[] = []
@@ -343,6 +350,12 @@ function QuickSwitcher({ currentModel, config, oauthProviders, onSwitch, isSwitc
       available: true,
       group: 'cli',
     })
+    opts.push({
+      model: 'claude-cli/haiku',
+      label: 'Claude CLI (Haiku)',
+      available: true,
+      group: 'cli',
+    })
 
     // API providers — check if key is configured
     const apiProviders: Array<{ name: string; model: string; label: string }> = [
@@ -367,22 +380,40 @@ function QuickSwitcher({ currentModel, config, oauthProviders, onSwitch, isSwitc
       })
     }
 
+    // CLI Proxy API models (from orchestrator discovery)
+    const proxyModels = (modelsData?.models ?? []).filter(
+      (m: { model: string }) => m.model.startsWith('openai/cc/'),
+    )
+    const existingModels = new Set(opts.map((o) => o.model))
+    for (const pm of proxyModels) {
+      if (existingModels.has(pm.model)) continue
+      const short = pm.model.replace('openai/cc/', '')
+      opts.push({
+        model: pm.model,
+        label: `${short} (via Proxy)`,
+        available: true,
+        group: 'proxy',
+      })
+    }
+
     return opts
-  }, [providers, oauthProviders])
+  }, [providers, oauthProviders, modelsData])
 
   const GROUP_LABELS: Record<string, string> = {
     oauth: 'Gateway (OAuth Subscriptions)',
     cli: 'CLI Subprocess',
     api: 'API Key Providers',
+    proxy: 'CLI Proxy API',
   }
   const GROUP_BADGE: Record<string, string> = {
     oauth: 'border-primary/30 text-primary',
     cli: 'border-warning/30 text-warning',
     api: 'border-success/30 text-success',
+    proxy: 'border-blue-500/30 text-blue-500',
   }
 
   // Group options and render with headers
-  const groups = ['oauth', 'cli', 'api'] as const
+  const groups = ['oauth', 'cli', 'api', 'proxy'] as const
   const grouped = groups.map((g) => ({
     key: g,
     label: GROUP_LABELS[g],
