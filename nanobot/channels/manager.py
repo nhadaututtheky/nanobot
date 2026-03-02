@@ -169,7 +169,6 @@ class ChannelManager:
         from nanobot.providers.litellm_provider import LiteLLMProvider
 
         # Team bots need LiteLLMProvider to route different models per role.
-        # The main provider may be ClaudeCLIProvider which can't do that.
         model = self.config.agents.defaults.model
         p = self.config.get_provider(model)
         return LiteLLMProvider(
@@ -209,10 +208,10 @@ class ChannelManager:
                     continue
 
                 # Create per-role agents
-                effective_roles = self.config.agents.subagent.get_effective_roles()
+                effective_team_roles = group_cfg.get_effective_team_roles()
                 agents: dict[str, TeamRoleAgent] = {}
                 for role_name in manager.bots:
-                    role_cfg = effective_roles.get(role_name)
+                    role_cfg = effective_team_roles.get(role_name)
                     if role_cfg:
                         agents[role_name] = TeamRoleAgent(
                             role=role_name,

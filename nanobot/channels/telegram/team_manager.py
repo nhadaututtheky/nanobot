@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from nanobot.channels.telegram.team_agent import TeamRoleAgent
     from nanobot.config.schema import (
         Config,
-        SubAgentRoleConfig,
+        TeamRoleConfig,
         TelegramTeamGroupConfig,
     )
     from nanobot.providers.base import LLMProvider
@@ -68,7 +68,7 @@ class TelegramTeamBot:
     def __init__(
         self,
         role: str,
-        role_config: SubAgentRoleConfig,
+        role_config: TeamRoleConfig,
         token: str,
         team_bus: TeamBus,
         is_coordinator: bool = False,
@@ -227,8 +227,8 @@ class TelegramTeamManager:
         self._init_bots()
 
     def _init_bots(self) -> None:
-        """Create team bots from SubAgentRoleConfig entries with tokens."""
-        effective_roles = self._config.agents.subagent.get_effective_roles()
+        """Create team bots from TeamRoleConfig entries with tokens."""
+        effective_roles = self._group_config.get_effective_team_roles()
         target_roles = self._group_config.roles or list(effective_roles.keys())
         coordinator = self._group_config.coordinator_role
 

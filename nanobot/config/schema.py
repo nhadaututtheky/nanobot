@@ -47,7 +47,9 @@ class TelegramGroupConfig(Base):
     require_mention: bool = True  # If false, bot responds to all messages
     system_prompt: str = ""  # Injected system prompt for this group
     allow_from: list[str] = Field(default_factory=list)  # Per-group allowlist
-    ignore_senders: list[str] = Field(default_factory=list)  # Sender name/username prefixes to ignore
+    ignore_senders: list[str] = Field(
+        default_factory=list
+    )  # Sender name/username prefixes to ignore
     ignore_patterns: list[str] = Field(default_factory=list)  # Regex patterns on content to ignore
     history_limit: int = 100
 
@@ -60,12 +62,136 @@ class TelegramActionsConfig(Base):
     set_reaction: bool = True
 
 
+class RoleConfig(Base):
+    """Shared role identity + LLM params — used by both SubagentManager and TeamRoleAgent."""
+
+    model: str = ""  # empty = inherit from main agent
+    display_name: str = ""
+    description: str = ""
+    persona: str = ""  # Extra system prompt (personality)
+    icon: str = ""  # Emoji: "🔍", "💻"
+    strengths: list[str] = Field(default_factory=list)
+    builtin: bool = False  # True for default 4 (UI blocks deletion)
+    temperature: float = 0.0  # 0 = inherit defaults
+    max_tokens: int = 0  # 0 = inherit defaults
+
+
+class SubAgentRoleConfig(RoleConfig):
+    """Background sub-agent config — human-friendly presets for SubagentManager."""
+
+    # Human-friendly presets (mapped to LLM params by SubagentManager)
+    thinking_style: str = ""  # "creative" | "balanced" | "precise" → maps to temperature
+    persistence: str = ""  # "quick" | "normal" | "thorough" → maps to max_iterations
+    response_length: str = ""  # "brief" | "normal" | "detailed" → maps to max_tokens
+    max_iterations: int = 0  # 0 = inherit defaults
+    tools: list[str] = Field(default_factory=list)  # legacy tool whitelist
+
+    # Telegram identity (optional, for orchestrator multi-bot posting)
+    telegram_bot_token: str = ""  # Bot token for this role (empty = use main bot)
+
+
+class TeamRoleConfig(RoleConfig):
+    """Telegram team bot config — raw LLM params + bot identity for TeamRoleAgent."""
+
+    telegram_bot_token: str = ""  # Bot token for this role (required for team bots)
+    allowed_tools: list[str] = Field(
+        default_factory=list
+    )  # fnmatch whitelist: ["nmem_*", "web_search", "exec"]
+    denied_tools: list[str] = Field(default_factory=list)  # fnmatch blacklist: ["exec", "write_file"]
+
+
+BUILTIN_ROLES: dict[str, dict] = {
+    "general": {
+        "display_name": "General",
+        "icon": "🤖",
+        "builtin": True,
+        "description": "General-purpose agent with all tools",
+        "strengths": ["versatile", "all tools"],
+        "persona": (
+            "Bạn là Jarvis — trợ lý AI đa năng. "
+            "Giao tiếp bằng tiếng Việt có dấu, rõ ràng, thân thiện. "
+            "Code, comments, biến: luôn dùng tiếng Anh. "
+            "Phong cách: thực tế, đi thẳng vấn đề, không dài dòng. "
+            "Khi cần sáng tạo thì đề xuất nhiều hướng. "
+            "Luôn tóm tắt kết quả ở cuối response."
+        ),
+    },
+    "researcher": {
+        "display_name": "Researcher",
+        "icon": "🔍",
+        "builtin": True,
+        "description": "Read-only research — web search, file reading, memory",
+        "strengths": ["web research", "file analysis", "memory"],
+        "tools": ["read_file", "list_dir", "web_search", "web_fetch"],
+        "persona": (
+            "Bạn là nhà nghiên cứu — tỉ mỉ, chính xác, có phương pháp. "
+            "Giao tiếp bằng tiếng Việt có dấu. Code/thuật ngữ kỹ thuật: tiếng Anh. "
+            "Phong cách: phân tích logic, trình bày có cấu trúc (bullet points, headings). "
+            "Luôn ghi rõ nguồn thông tin. Khi không chắc chắn, nói rõ mức độ tin cậy. "
+            "Tóm tắt findings ở cuối với key takeaways."
+        ),
+    },
+    "coder": {
+        "display_name": "Code Writer",
+        "icon": "💻",
+        "builtin": True,
+        "description": "Code writing and execution — files, shell, web",
+        "strengths": ["coding", "file editing", "shell"],
+        "tools": [
+            "read_file",
+            "write_file",
+            "edit_file",
+            "list_dir",
+            "exec",
+            "web_search",
+            "web_fetch",
+        ],
+        "persona": (
+            "Bạn là lập trình viên senior — code clean, hiệu quả, có pattern. "
+            "Giao tiếp bằng tiếng Việt có dấu. Code, comments, variable names: tiếng Anh. "
+            "Phong cách: ngắn gọn, tập trung vào code. Giải thích khi logic phức tạp. "
+            "Tuân thủ: immutability, type hints, error handling cụ thể, không print() production. "
+            "Mỗi file < 500 LOC. Test khi cần. "
+            "Tóm tắt thay đổi ở cuối: file nào, sửa gì, tại sao."
+        ),
+    },
+    "reviewer": {
+        "display_name": "Reviewer",
+        "icon": "📋",
+        "builtin": True,
+        "description": "Read-only code and content analysis",
+        "strengths": ["code review", "analysis"],
+        "tools": ["read_file", "list_dir"],
+        "persona": (
+            "Bạn là code reviewer kỹ tính — mắt tinh, tiêu chuẩn cao. "
+            "Giao tiếp bằng tiếng Việt có dấu. Thuật ngữ kỹ thuật: tiếng Anh. "
+            "Phong cách: thẳng thắn, constructive. Phân loại issue: CRITICAL / HIGH / MEDIUM / LOW. "
+            "Kiểm tra: security, performance, maintainability, edge cases, naming, immutability. "
+            "Khen khi code tốt. Đề xuất fix cụ thể cho mỗi issue. "
+            "Tóm tắt ở cuối: bao nhiêu issues theo severity, overall assessment."
+        ),
+    },
+}
+
+
+BUILTIN_TEAM_ROLES: dict[str, dict] = {
+    role_id: {
+        k: v
+        for k, v in defaults.items()
+        if k in ("display_name", "icon", "builtin", "description", "strengths", "persona")
+    }
+    for role_id, defaults in BUILTIN_ROLES.items()
+}
+
+
 class TelegramTeamGroupConfig(Base):
     """Config for a multi-bot team group where sub-agent bots act as team members."""
 
     enabled: bool = True
     chat_id: str = ""  # Telegram group chat ID
-    roles: list[str] = Field(default_factory=list)  # Which roles participate (empty = all with tokens)
+    roles: list[str] = Field(
+        default_factory=list
+    )  # Which roles participate (empty = all with tokens)
     coordinator_role: str = "general"  # Role that always responds to direct mentions
     relevance_model: str = ""  # Model for relevance check (empty = cheapest available)
     relevance_threshold: float = 0.6  # 0-1, how confident a role must be to speak
@@ -76,6 +202,39 @@ class TelegramTeamGroupConfig(Base):
     # Safety: allowlisted Telegram user IDs (empty = allow all — NOT recommended for exec)
     allowed_user_ids: list[str] = Field(default_factory=list)
 
+    # Per-role team bot config (overrides BUILTIN_TEAM_ROLES defaults)
+    team_roles: dict[str, TeamRoleConfig] = Field(default_factory=dict)
+
+    def get_effective_team_roles(self) -> dict[str, TeamRoleConfig]:
+        """Merge BUILTIN_TEAM_ROLES defaults with user overrides + custom roles."""
+        result: dict[str, TeamRoleConfig] = {}
+
+        for role_id, defaults in BUILTIN_TEAM_ROLES.items():
+            base = TeamRoleConfig(**defaults)
+            if role_id in self.team_roles:
+                override = self.team_roles[role_id]
+                merged = {
+                    **base.model_dump(),
+                    **{k: v for k, v in override.model_dump().items() if v},
+                }
+                merged["builtin"] = defaults.get("builtin", False)
+                if override.strengths:
+                    merged["strengths"] = override.strengths
+                if override.allowed_tools:
+                    merged["allowed_tools"] = override.allowed_tools
+                if override.denied_tools:
+                    merged["denied_tools"] = override.denied_tools
+                result[role_id] = TeamRoleConfig(**merged)
+            else:
+                result[role_id] = base
+
+        # Custom roles not in builtins
+        for role_id, role_cfg in self.team_roles.items():
+            if role_id not in BUILTIN_TEAM_ROLES:
+                result[role_id] = role_cfg
+
+        return result
+
 
 class TelegramConfig(Base):
     """Telegram channel configuration."""
@@ -84,7 +243,9 @@ class TelegramConfig(Base):
     enabled: bool = False
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
-    proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
+    proxy: str | None = (
+        None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
+    )
     reply_to_message: bool = False  # If true, bot replies quote the original message
 
     # --- Retry ---
@@ -96,14 +257,18 @@ class TelegramConfig(Base):
     actions: TelegramActionsConfig = Field(default_factory=TelegramActionsConfig)
 
     # --- Behavior ---
-    ack_reaction: str = ""  # Emoji to react with on processing start (e.g. "eyes"). Empty = disabled
+    ack_reaction: str = (
+        ""  # Emoji to react with on processing start (e.g. "eyes"). Empty = disabled
+    )
     link_preview: bool = True  # False → sends disable_web_page_preview=True
     response_prefix: str = ""  # Text prepended to every response
     chunk_mode: Literal["length", "newline"] = "newline"  # How to split long messages
     history_limit: int = 100  # Default history window
 
     # --- Streaming ---
-    streaming: Literal["off", "draft", "edit"] = "off"  # draft=sendMessageDraft, edit=edit_message_text
+    streaming: Literal["off", "draft", "edit"] = (
+        "off"  # draft=sendMessageDraft, edit=edit_message_text
+    )
 
     # --- Transport ---
     mode: Literal["polling", "webhook"] = "polling"
@@ -127,7 +292,9 @@ class FeishuConfig(Base):
     encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
     verification_token: str = ""  # Verification Token for event subscription (optional)
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
-    react_emoji: str = "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
+    react_emoji: str = (
+        "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
+    )
 
 
 class DingTalkConfig(Base):
@@ -157,9 +324,13 @@ class MatrixConfig(Base):
     access_token: str = ""
     user_id: str = ""  # @bot:matrix.org
     device_id: str = ""
-    e2ee_enabled: bool = True # Enable Matrix E2EE support (encryption + encrypted room handling).
-    sync_stop_grace_seconds: int = 2 # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback.
-    max_media_bytes: int = 20 * 1024 * 1024 # Max attachment size accepted for Matrix media handling (inbound + outbound).
+    e2ee_enabled: bool = True  # Enable Matrix E2EE support (encryption + encrypted room handling).
+    sync_stop_grace_seconds: int = (
+        2  # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback.
+    )
+    max_media_bytes: int = (
+        20 * 1024 * 1024
+    )  # Max attachment size accepted for Matrix media handling (inbound + outbound).
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)
@@ -190,7 +361,9 @@ class EmailConfig(Base):
     from_address: str = ""
 
     # Behavior
-    auto_reply_enabled: bool = True  # If false, inbound email is read but no automatic reply is sent
+    auto_reply_enabled: bool = (
+        True  # If false, inbound email is read but no automatic reply is sent
+    )
     poll_interval_seconds: int = 30
     mark_seen: bool = True
     max_body_chars: int = 12000
@@ -267,7 +440,9 @@ class QQConfig(Base):
     enabled: bool = False
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
+    allow_from: list[str] = Field(
+        default_factory=list
+    )  # Allowed user openids (empty = public access)
 
 
 class TelegramUserbotConfig(Base):
@@ -279,14 +454,16 @@ class TelegramUserbotConfig(Base):
     phone: str = ""
     session_path: str = "~/.nanobot/telegram_userbot"
     observe_groups: list[str] = Field(default_factory=list)  # Chat IDs to observe (empty = all)
-    ignore_senders: list[str] = Field(default_factory=list)  # Sender name/username prefixes to ignore (e.g. ["ray_"])
+    ignore_senders: list[str] = Field(
+        default_factory=list
+    )  # Sender name/username prefixes to ignore (e.g. ["ray_"])
     ignore_patterns: list[str] = Field(default_factory=list)  # Regex patterns on content to ignore
 
 
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
-    send_progress: bool = True    # stream agent's text progress to the channel
+    send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
@@ -306,108 +483,13 @@ class AgentDefaults(Base):
 
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-6"
-    provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
+    provider: str = (
+        "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
+    )
     max_tokens: int = 8192
     temperature: float = 0.1
     max_tool_iterations: int = 40
     memory_window: int = 100
-
-
-class SubAgentRoleConfig(Base):
-    """Per-role configuration for subagents."""
-
-    # Core (existing)
-    model: str = ""  # empty = inherit from main agent
-    max_iterations: int = 0  # 0 = inherit defaults
-    temperature: float = 0.0  # 0 = inherit defaults
-    max_tokens: int = 0  # 0 = inherit defaults
-    tools: list[str] = Field(default_factory=list)  # empty = role default
-
-    # Identity
-    display_name: str = ""
-    description: str = ""
-    persona: str = ""  # Extra system prompt (personality)
-    icon: str = ""  # Emoji: "🔍", "💻"
-    strengths: list[str] = Field(default_factory=list)
-    builtin: bool = False  # True for default 4 (UI blocks deletion)
-
-    # Human-friendly presets
-    thinking_style: str = ""  # "creative" | "balanced" | "precise"
-    persistence: str = ""  # "quick" | "normal" | "thorough"
-    response_length: str = ""  # "brief" | "normal" | "detailed"
-
-    # Telegram identity (optional, for orchestrator multi-bot)
-    telegram_bot_token: str = ""  # Bot token for this role (empty = use main bot)
-
-    # Team tool permissions (empty = all tools allowed)
-    allowed_tools: list[str] = Field(default_factory=list)  # Whitelist: ["nmem_*", "web_search", "exec"]
-    denied_tools: list[str] = Field(default_factory=list)  # Blacklist: ["exec", "write_file"]
-
-
-BUILTIN_ROLES: dict[str, dict] = {
-    "general": {
-        "display_name": "General",
-        "icon": "🤖",
-        "builtin": True,
-        "description": "General-purpose agent with all tools",
-        "strengths": ["versatile", "all tools"],
-        "persona": (
-            "Bạn là Jarvis — trợ lý AI đa năng. "
-            "Giao tiếp bằng tiếng Việt có dấu, rõ ràng, thân thiện. "
-            "Code, comments, biến: luôn dùng tiếng Anh. "
-            "Phong cách: thực tế, đi thẳng vấn đề, không dài dòng. "
-            "Khi cần sáng tạo thì đề xuất nhiều hướng. "
-            "Luôn tóm tắt kết quả ở cuối response."
-        ),
-    },
-    "researcher": {
-        "display_name": "Researcher",
-        "icon": "🔍",
-        "builtin": True,
-        "description": "Read-only research — web search, file reading, memory",
-        "strengths": ["web research", "file analysis", "memory"],
-        "tools": ["read_file", "list_dir", "web_search", "web_fetch"],
-        "persona": (
-            "Bạn là nhà nghiên cứu — tỉ mỉ, chính xác, có phương pháp. "
-            "Giao tiếp bằng tiếng Việt có dấu. Code/thuật ngữ kỹ thuật: tiếng Anh. "
-            "Phong cách: phân tích logic, trình bày có cấu trúc (bullet points, headings). "
-            "Luôn ghi rõ nguồn thông tin. Khi không chắc chắn, nói rõ mức độ tin cậy. "
-            "Tóm tắt findings ở cuối với key takeaways."
-        ),
-    },
-    "coder": {
-        "display_name": "Code Writer",
-        "icon": "💻",
-        "builtin": True,
-        "description": "Code writing and execution — files, shell, web",
-        "strengths": ["coding", "file editing", "shell"],
-        "tools": ["read_file", "write_file", "edit_file", "list_dir", "exec", "web_search", "web_fetch"],
-        "persona": (
-            "Bạn là lập trình viên senior — code clean, hiệu quả, có pattern. "
-            "Giao tiếp bằng tiếng Việt có dấu. Code, comments, variable names: tiếng Anh. "
-            "Phong cách: ngắn gọn, tập trung vào code. Giải thích khi logic phức tạp. "
-            "Tuân thủ: immutability, type hints, error handling cụ thể, không print() production. "
-            "Mỗi file < 500 LOC. Test khi cần. "
-            "Tóm tắt thay đổi ở cuối: file nào, sửa gì, tại sao."
-        ),
-    },
-    "reviewer": {
-        "display_name": "Reviewer",
-        "icon": "📋",
-        "builtin": True,
-        "description": "Read-only code and content analysis",
-        "strengths": ["code review", "analysis"],
-        "tools": ["read_file", "list_dir"],
-        "persona": (
-            "Bạn là code reviewer kỹ tính — mắt tinh, tiêu chuẩn cao. "
-            "Giao tiếp bằng tiếng Việt có dấu. Thuật ngữ kỹ thuật: tiếng Anh. "
-            "Phong cách: thẳng thắn, constructive. Phân loại issue: CRITICAL / HIGH / MEDIUM / LOW. "
-            "Kiểm tra: security, performance, maintainability, edge cases, naming, immutability. "
-            "Khen khi code tốt. Đề xuất fix cụ thể cho mỗi issue. "
-            "Tóm tắt ở cuối: bao nhiêu issues theo severity, overall assessment."
-        ),
-    },
-}
 
 
 class SubAgentConfig(Base):
@@ -495,14 +577,6 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
-class ClaudeCLIConfig(Base):
-    """Claude CLI provider configuration (subscription-based, no API key)."""
-
-    project_dir: str = ""              # Working directory for CLI process
-    permission_mode: str = "bypassPermissions"
-    timeout: int = 120                 # Seconds before CLI call times out
-
-
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
@@ -519,11 +593,17 @@ class ProvidersConfig(Base):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
-    siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动) API gateway
-    volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎) API gateway
+    siliconflow: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # SiliconFlow (硅基流动) API gateway
+    volcengine: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # VolcEngine (火山引擎) API gateway
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
-    claude_cli: ClaudeCLIConfig = Field(default_factory=ClaudeCLIConfig)  # Claude CLI (subscription)
+    cli_proxy: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # CLI Proxy API (OpenAI-compatible local proxy)
 
 
 class HeartbeatConfig(Base):
@@ -609,7 +689,9 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
-    def _match_provider(self, model: str | None = None) -> tuple["ProviderConfig | None", str | None]:
+    def _match_provider(
+        self, model: str | None = None
+    ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS
 

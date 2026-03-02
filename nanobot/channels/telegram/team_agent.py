@@ -16,7 +16,7 @@ from nanobot.session.manager import SessionManager
 if TYPE_CHECKING:
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.channels.telegram.team_bus import TeamMessage
-    from nanobot.config.schema import Config, SubAgentRoleConfig, TelegramTeamGroupConfig
+    from nanobot.config.schema import Config, TeamRoleConfig, TelegramTeamGroupConfig
     from nanobot.providers.base import LLMProvider
 
 # Max tool-call rounds to prevent infinite loops
@@ -76,7 +76,7 @@ class TeamRoleAgent:
     def __init__(
         self,
         role: str,
-        role_config: SubAgentRoleConfig,
+        role_config: TeamRoleConfig,
         provider: LLMProvider,
         workspace: Path,
         config: Config,

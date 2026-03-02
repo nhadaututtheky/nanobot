@@ -10,7 +10,7 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from nanobot.channels.telegram.team_bus import TeamMessage
-    from nanobot.config.schema import SubAgentRoleConfig, TelegramTeamGroupConfig
+    from nanobot.config.schema import TeamRoleConfig, TelegramTeamGroupConfig
     from nanobot.providers.base import LLMProvider
 
 
@@ -67,7 +67,7 @@ class RelevanceGate:
     async def check(
         self,
         role: str,
-        role_config: SubAgentRoleConfig,
+        role_config: TeamRoleConfig,
         message: TeamMessage,
         already_claimed: set[str],
     ) -> RelevanceResult:
