@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +24,45 @@ _MAX_TOOL_ROUNDS = 5
 
 # Tools that are dangerous without user allowlisting
 _SENSITIVE_TOOLS = frozenset({"exec", "write_file", "edit_file"})
+
+# Tools excluded from team agents — team system handles sending via bot.send_message()
+_EXCLUDED_TEAM_TOOLS = frozenset({"message"})
+
+# Regex for XML-formatted tool calls that some models output as text
+# Matches: <tool_name><parameter=key>value</parameter>...</tool_name>
+_XML_TOOL_CALL_RE = re.compile(
+    r"<([\w_]+)>\s*((?:<parameter=\w+>.*?</parameter>\s*)*)\s*</\1>",
+    re.DOTALL,
+)
+_XML_PARAM_RE = re.compile(r"<parameter=(\w+)>(.*?)</parameter>", re.DOTALL)
+# Also match broken XML variants: </function>, </tool_call>, bare <tool_name> without closing
+_XML_JUNK_RE = re.compile(r"</?(tool_call|function|parameter[^>]*)>")
+
+
+def _extract_xml_tool_calls(text: str) -> list[tuple[str, dict[str, str]]]:
+    """Extract XML-formatted tool calls from response text.
+
+    Some models that don't support native function calling fall back to
+    outputting tool calls as XML in the response content. This parses them
+    so we can execute via the tool registry.
+
+    Returns list of (tool_name, {param_name: param_value}).
+    """
+    results: list[tuple[str, dict[str, str]]] = []
+    for m in _XML_TOOL_CALL_RE.finditer(text):
+        tool_name = m.group(1)
+        params: dict[str, str] = {}
+        for pm in _XML_PARAM_RE.finditer(m.group(2)):
+            params[pm.group(1)] = pm.group(2).strip()
+        results.append((tool_name, params))
+    return results
+
+
+def _strip_xml_tool_markup(text: str) -> str:
+    """Remove all XML tool call markup from text."""
+    text = _XML_TOOL_CALL_RE.sub("", text)
+    text = _XML_JUNK_RE.sub("", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 class TeamRoleAgent:
@@ -100,7 +140,8 @@ class TeamRoleAgent:
         all_defs = self._tools.get_definitions()
         filtered = [
             d for d in all_defs
-            if self._is_tool_allowed(d.get("function", {}).get("name", ""))
+            if (name := d.get("function", {}).get("name", "")) not in _EXCLUDED_TEAM_TOOLS
+            and self._is_tool_allowed(name)
         ]
         return filtered if filtered else None
 
@@ -154,14 +195,47 @@ class TeamRoleAgent:
                     tools=tool_defs,
                 )
 
-                # If no tool calls, we have a text response
+                # LLM returned an error — surface it clearly
+                if llm_response.finish_reason == "error":
+                    error_detail = llm_response.content or "Unknown error"
+                    logger.error("TeamAgent[{}] LLM error: {}", self._role, error_detail)
+                    return f"⚠️ {error_detail}"
+
+                # If no structured tool calls, check for XML-formatted ones
                 if not llm_response.tool_calls:
-                    content = llm_response.content
+                    content = llm_response.content or ""
+                    xml_calls = _extract_xml_tool_calls(content) if tool_defs else []
+
+                    if xml_calls:
+                        # Model output XML tool calls — parse and execute
+                        logger.info(
+                            "TeamAgent[{}] detected {} XML tool call(s), executing",
+                            self._role, len(xml_calls),
+                        )
+                        messages.append({"role": "assistant", "content": content})
+                        for xc_name, xc_args in xml_calls:
+                            if xc_name in _EXCLUDED_TEAM_TOOLS:
+                                continue
+                            if not self._is_tool_allowed(xc_name):
+                                logger.warning("TeamAgent[{}] blocked XML tool: {}", self._role, xc_name)
+                                continue
+                            if self._tools and self._tools.has(xc_name):
+                                logger.debug("TeamAgent[{}] XML tool: {}({})", self._role, xc_name, list(xc_args.keys()))
+                                xc_result = await self._tools.execute(xc_name, xc_args)
+                                messages.append({
+                                    "role": "user",
+                                    "content": f"[Tool Result: {xc_name}]\n{str(xc_result)[:4000]}",
+                                })
+                        # Continue to next round — model will see tool results
+                        continue
+
+                    # Normal text response — strip any leftover XML junk
+                    content = _strip_xml_tool_markup(content)
                     if content:
                         session.add_message("user", msg.content)
                         session.add_message("assistant", content)
                         self._sessions.save(session)
-                    return content
+                    return content or None
 
                 # Process tool calls
                 messages.append({
@@ -182,8 +256,11 @@ class TeamRoleAgent:
                         except json.JSONDecodeError:
                             tool_args = {}
 
+                    # Block excluded tools (e.g. message — team system handles sending)
+                    if tool_name in _EXCLUDED_TEAM_TOOLS:
+                        result = "Respond with text directly — the team system sends your response."
                     # Safety: double-check tool permission
-                    if not self._is_tool_allowed(tool_name):
+                    elif not self._is_tool_allowed(tool_name):
                         result = f"Tool '{tool_name}' is not permitted for role '{self._role}'."
                         logger.warning("TeamAgent[{}] blocked tool: {}", self._role, tool_name)
                     elif self._tools and self._tools.has(tool_name):
@@ -205,12 +282,12 @@ class TeamRoleAgent:
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
-            content = llm_response.content
+            content = _strip_xml_tool_markup(llm_response.content or "")
             if content:
                 session.add_message("user", msg.content)
                 session.add_message("assistant", content)
                 self._sessions.save(session)
-            return content
+            return content or None
 
         except Exception as e:
             logger.error("TeamRoleAgent[{}] LLM call failed: {}", self._role, e)
@@ -224,7 +301,10 @@ class TeamRoleAgent:
         tool_hint = ""
         if self._tools:
             all_names = [t.name for t in self._tools._tools.values()]
-            allowed_names = [n for n in all_names if self._is_tool_allowed(n)]
+            allowed_names = [
+                n for n in all_names
+                if n not in _EXCLUDED_TEAM_TOOLS and self._is_tool_allowed(n)
+            ]
             nmem_tools = [n for n in allowed_names if n.startswith("nmem_")]
             other_tools = [n for n in allowed_names if not n.startswith("nmem_")]
 

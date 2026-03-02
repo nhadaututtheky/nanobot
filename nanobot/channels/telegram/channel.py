@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 from loguru import logger
 from telegram import BotCommand, ReplyParameters, Update
@@ -267,6 +268,10 @@ class TelegramChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
+        # Skip progress/intermediate messages — only send final responses
+        if msg.metadata and msg.metadata.get("_progress"):
+            return
+
         if not self._app:
             logger.warning("Telegram bot not running")
             return
@@ -535,6 +540,20 @@ class TelegramChannel(BaseChannel):
         if is_group:
             sender_name = user.first_name or user.username or "Unknown"
             content = f"[{sender_name}]: {content}"
+
+        # --- Per-group ignore filters ---
+        if is_group:
+            gcfg = self._get_group_config(str_chat_id)
+            if gcfg.ignore_senders:
+                name_lower = (user.first_name or "").lower()
+                uname_lower = (user.username or "").lower()
+                prefixes = [s.lower() for s in gcfg.ignore_senders]
+                if any(name_lower.startswith(p) or uname_lower.startswith(p) for p in prefixes):
+                    return
+            if gcfg.ignore_patterns:
+                ignore_re = [re.compile(p, re.IGNORECASE) for p in gcfg.ignore_patterns]
+                if any(r.search(content) for r in ignore_re):
+                    return
 
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
 

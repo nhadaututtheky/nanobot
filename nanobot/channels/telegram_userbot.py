@@ -10,6 +10,7 @@ TelegramChannel (Bot API) handles all outbound communication.
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -40,6 +41,8 @@ class TelegramUserbotChannel(BaseChannel):
         self.config: TelegramUserbotConfig = config
         self._client = None
         self._observe_set: set[str] = set(config.observe_groups)
+        self._ignore_senders = [s.lower() for s in config.ignore_senders]
+        self._ignore_re = [re.compile(p, re.IGNORECASE) for p in config.ignore_patterns]
 
     async def start(self) -> None:
         """Connect the Telethon client and start listening."""
@@ -108,9 +111,23 @@ class TelegramUserbotChannel(BaseChannel):
 
         sender_name = getattr(sender, "first_name", None) or getattr(sender, "username", None) or "Bot"
         sender_id = str(sender.id)
+
+        # Drop messages from ignored senders (prefix match, case-insensitive)
+        if self._ignore_senders:
+            name_lower = (sender_name or "").lower()
+            uname_lower = (getattr(sender, "username", "") or "").lower()
+            if any(name_lower.startswith(p) or uname_lower.startswith(p) for p in self._ignore_senders):
+                logger.debug("Userbot: ignored sender '{}' in {}", sender_name, chat_id)
+                return
+
         text = msg.text or msg.message or ""
 
         if not text.strip():
+            return
+
+        # Drop messages matching ignore patterns
+        if self._ignore_re and any(r.search(text) for r in self._ignore_re):
+            logger.debug("Userbot: ignored pattern in msg from '{}' in {}", sender_name, chat_id)
             return
 
         content = f"[{sender_name}]: {text}"

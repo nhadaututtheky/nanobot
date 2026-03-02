@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -342,8 +343,22 @@ class TelegramTeamManager:
             if name_lower in text_lower.split():
                 directly_mentioned.add(role)
 
-        # If nobody specifically mentioned, coordinator is always eligible
+        # Check if message mentions a non-team bot (e.g. @reversedev_bot)
+        team_usernames = {b.bot_username for b in self.bots.values() if b.bot_username}
+        non_team_bot_mentions = [
+            m for m in re.findall(r"@([\w]+)", text_lower)
+            if m.endswith("bot") and m not in team_usernames
+        ]
+
+        # If nobody specifically mentioned, coordinator is eligible
+        # BUT not if message is directed at an external bot
         if not directly_mentioned:
+            if non_team_bot_mentions:
+                logger.debug(
+                    "Team: message mentions external bot(s) {}, skipping",
+                    non_team_bot_mentions,
+                )
+                return
             directly_mentioned.add(coordinator)
 
         # Phase 1: directly mentioned roles respond immediately (no relevance check)
@@ -405,6 +420,13 @@ class TelegramTeamManager:
         try:
             response = await agent.respond(msg)
             if response:
+                # Strip leaked tool result artifacts and raw HTML tags
+                response = re.sub(r"\[Tool Result:.*?\]", "", response)
+                response = re.sub(r"<br\s*/?>", "\n", response)
+                response = response.strip()
+                if not response:
+                    return
+
                 await bot.send_message(
                     chat_id=msg.chat_id,
                     text=response,
