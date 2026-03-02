@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from typing import Any
 
 from loguru import logger
@@ -10,6 +11,21 @@ from loguru import logger
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+
+# (config_attr, module_path, class_name)
+_CHANNEL_REGISTRY: tuple[tuple[str, str, str], ...] = (
+    ("telegram", "nanobot.channels.telegram", "TelegramChannel"),
+    ("whatsapp", "nanobot.channels.whatsapp", "WhatsAppChannel"),
+    ("discord", "nanobot.channels.discord", "DiscordChannel"),
+    ("feishu", "nanobot.channels.feishu", "FeishuChannel"),
+    ("mochat", "nanobot.channels.mochat", "MochatChannel"),
+    ("dingtalk", "nanobot.channels.dingtalk", "DingTalkChannel"),
+    ("email", "nanobot.channels.email", "EmailChannel"),
+    ("slack", "nanobot.channels.slack", "SlackChannel"),
+    ("qq", "nanobot.channels.qq", "QQChannel"),
+    ("telegram_userbot", "nanobot.channels.telegram_userbot", "TelegramUserbotChannel"),
+    ("matrix", "nanobot.channels.matrix", "MatrixChannel"),
+)
 
 
 class ChannelManager:
@@ -32,134 +48,26 @@ class ChannelManager:
 
         self._init_channels()
 
+    def _get_channel_kwargs(self, attr: str) -> dict[str, Any]:
+        """Return extra kwargs for channels that need them."""
+        if attr == "telegram":
+            return {"groq_api_key": self.config.providers.groq.api_key}
+        return {}
+
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
-
-        # Telegram channel
-        if self.config.channels.telegram.enabled:
+        for attr, module, cls_name in _CHANNEL_REGISTRY:
+            cfg = getattr(self.config.channels, attr, None)
+            if not (cfg and cfg.enabled):
+                continue
             try:
-                from nanobot.channels.telegram import TelegramChannel
-                self.channels["telegram"] = TelegramChannel(
-                    self.config.channels.telegram,
-                    self.bus,
-                    groq_api_key=self.config.providers.groq.api_key,
-                )
-                logger.info("Telegram channel enabled")
+                mod = importlib.import_module(module)
+                cls = getattr(mod, cls_name)
+                extra = self._get_channel_kwargs(attr)
+                self.channels[attr] = cls(cfg, self.bus, **extra)
+                logger.info("{} channel enabled", attr)
             except ImportError as e:
-                logger.warning("Telegram channel not available: {}", e)
-
-        # WhatsApp channel
-        if self.config.channels.whatsapp.enabled:
-            try:
-                from nanobot.channels.whatsapp import WhatsAppChannel
-                self.channels["whatsapp"] = WhatsAppChannel(
-                    self.config.channels.whatsapp, self.bus
-                )
-                logger.info("WhatsApp channel enabled")
-            except ImportError as e:
-                logger.warning("WhatsApp channel not available: {}", e)
-
-        # Discord channel
-        if self.config.channels.discord.enabled:
-            try:
-                from nanobot.channels.discord import DiscordChannel
-                self.channels["discord"] = DiscordChannel(
-                    self.config.channels.discord, self.bus
-                )
-                logger.info("Discord channel enabled")
-            except ImportError as e:
-                logger.warning("Discord channel not available: {}", e)
-
-        # Feishu channel
-        if self.config.channels.feishu.enabled:
-            try:
-                from nanobot.channels.feishu import FeishuChannel
-                self.channels["feishu"] = FeishuChannel(
-                    self.config.channels.feishu, self.bus
-                )
-                logger.info("Feishu channel enabled")
-            except ImportError as e:
-                logger.warning("Feishu channel not available: {}", e)
-
-        # Mochat channel
-        if self.config.channels.mochat.enabled:
-            try:
-                from nanobot.channels.mochat import MochatChannel
-
-                self.channels["mochat"] = MochatChannel(
-                    self.config.channels.mochat, self.bus
-                )
-                logger.info("Mochat channel enabled")
-            except ImportError as e:
-                logger.warning("Mochat channel not available: {}", e)
-
-        # DingTalk channel
-        if self.config.channels.dingtalk.enabled:
-            try:
-                from nanobot.channels.dingtalk import DingTalkChannel
-                self.channels["dingtalk"] = DingTalkChannel(
-                    self.config.channels.dingtalk, self.bus
-                )
-                logger.info("DingTalk channel enabled")
-            except ImportError as e:
-                logger.warning("DingTalk channel not available: {}", e)
-
-        # Email channel
-        if self.config.channels.email.enabled:
-            try:
-                from nanobot.channels.email import EmailChannel
-                self.channels["email"] = EmailChannel(
-                    self.config.channels.email, self.bus
-                )
-                logger.info("Email channel enabled")
-            except ImportError as e:
-                logger.warning("Email channel not available: {}", e)
-
-        # Slack channel
-        if self.config.channels.slack.enabled:
-            try:
-                from nanobot.channels.slack import SlackChannel
-                self.channels["slack"] = SlackChannel(
-                    self.config.channels.slack, self.bus
-                )
-                logger.info("Slack channel enabled")
-            except ImportError as e:
-                logger.warning("Slack channel not available: {}", e)
-
-        # QQ channel
-        if self.config.channels.qq.enabled:
-            try:
-                from nanobot.channels.qq import QQChannel
-                self.channels["qq"] = QQChannel(
-                    self.config.channels.qq,
-                    self.bus,
-                )
-                logger.info("QQ channel enabled")
-            except ImportError as e:
-                logger.warning("QQ channel not available: {}", e)
-
-        # Telegram userbot (Telethon MTProto — observes bot messages in groups)
-        if self.config.channels.telegram_userbot.enabled:
-            try:
-                from nanobot.channels.telegram_userbot import TelegramUserbotChannel
-                self.channels["telegram_userbot"] = TelegramUserbotChannel(
-                    self.config.channels.telegram_userbot, self.bus
-                )
-                logger.info("Telegram userbot channel enabled")
-            except ImportError as e:
-                logger.warning("Telegram userbot channel not available: {}", e)
-
-        # Matrix channel
-        if self.config.channels.matrix.enabled:
-            try:
-                from nanobot.channels.matrix import MatrixChannel
-                self.channels["matrix"] = MatrixChannel(
-                    self.config.channels.matrix,
-                    self.bus,
-                )
-                logger.info("Matrix channel enabled")
-            except ImportError as e:
-                logger.warning("Matrix channel not available: {}", e)
+                logger.warning("{} channel not available: {}", attr, e)
 
         # Telegram multi-bot team groups
         self._init_telegram_teams()

@@ -113,7 +113,7 @@ class AgentLoop:
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
-        self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._active_tasks: dict[str, set[asyncio.Task]] = {}  # session_key -> tasks
         self._session_locks: dict[str, asyncio.Lock] = {}  # Per-session processing locks
         self._register_default_tools()
         self._init_orchestrator()
@@ -143,8 +143,7 @@ class AgentLoop:
 
         The orchestrator routes to many different models (Opus, Sonnet, Haiku,
         GPT-4.1, etc.) so it MUST use LiteLLMProvider which supports arbitrary
-        model routing. The main agent's provider (e.g. ClaudeCLIProvider) may
-        only support a single model family.
+        model routing.
         """
         from nanobot.providers.litellm_provider import LiteLLMProvider
 
@@ -155,15 +154,12 @@ class AgentLoop:
             return self.provider
 
         # Build a new LiteLLM provider from config
-        from nanobot.config.schema import ProviderConfig
-
         model = self._config.agents.defaults.model
         p = self._config.get_provider(model)
         provider_name = self._config.get_provider_name(model)
 
-        # get_provider() may return ClaudeCLIConfig (no api_key) — guard with isinstance
-        api_key = p.api_key if isinstance(p, ProviderConfig) else None
-        extra_headers = p.extra_headers if isinstance(p, ProviderConfig) else None
+        api_key = p.api_key if p else None
+        extra_headers = p.extra_headers if p else None
 
         return LiteLLMProvider(
             api_key=api_key,
@@ -425,15 +421,12 @@ class AgentLoop:
                 await self._handle_stop(msg)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
-                self._active_tasks.setdefault(msg.session_key, []).append(task)
+                self._active_tasks.setdefault(msg.session_key, set()).add(task)
 
                 def _cleanup_task(t: asyncio.Task, k: str = msg.session_key) -> None:
                     tasks = self._active_tasks.get(k)
                     if tasks is not None:
-                        try:
-                            tasks.remove(t)
-                        except ValueError:
-                            pass
+                        tasks.discard(t)
                         if not tasks:
                             del self._active_tasks[k]
 
@@ -441,7 +434,7 @@ class AgentLoop:
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
-        tasks = self._active_tasks.pop(msg.session_key, [])
+        tasks = self._active_tasks.pop(msg.session_key, set())
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
             try:
@@ -535,8 +528,10 @@ class AgentLoop:
         logger.debug("Observed message in {}: {}...", msg.session_key, msg.content[:60])
 
     def stop(self) -> None:
-        """Stop the agent loop."""
+        """Stop the agent loop and clean up stale state."""
         self._running = False
+        self._session_locks.clear()
+        self._consolidation_locks.clear()
         logger.info("Agent loop stopping")
 
     async def _process_message(

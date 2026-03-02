@@ -236,23 +236,23 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_oauth=True,                      # OAuth-based authentication
     ),
 
-    # Claude CLI: subscription-based, no API key. Uses Claude Code CLI subprocess.
+    # CLI Proxy API: OpenAI-compatible gateway that exposes Claude models via local proxy.
+    # Bypasses OAuth — uses API key from cli-proxy-api config.
     ProviderSpec(
-        name="claude_cli",
-        keywords=("claude-cli", "claude_cli"),
-        env_key="",                         # No API key — subscription-based
-        display_name="Claude CLI",
-        litellm_prefix="",                  # Not routed through LiteLLM
+        name="cli_proxy",
+        keywords=("cli-proxy", "cli_proxy"),
+        env_key="OPENAI_API_KEY",
+        display_name="CLI Proxy",
+        litellm_prefix="openai",
         skip_prefixes=(),
         env_extras=(),
-        is_gateway=False,
+        is_gateway=True,
         is_local=False,
         detect_by_key_prefix="",
-        detect_by_base_keyword="",
-        default_api_base="",
-        strip_model_prefix=False,
+        detect_by_base_keyword="20128",     # Default proxy port
+        default_api_base="http://localhost:20128/v1",
+        strip_model_prefix=True,            # anthropic/claude-3 → claude-3 → openai/claude-3
         model_overrides=(),
-        is_direct=True,                     # Bypasses LiteLLM entirely
     ),
 
     # DeepSeek: needs "deepseek/" prefix for LiteLLM routing.

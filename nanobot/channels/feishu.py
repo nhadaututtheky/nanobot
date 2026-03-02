@@ -265,6 +265,7 @@ class FeishuChannel(BaseChannel):
         self._client: Any = None
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -305,6 +306,8 @@ class FeishuChannel(BaseChannel):
         )
 
         # Start WebSocket client in a separate thread with reconnect loop
+        self._stop_event.clear()
+
         def run_ws():
             while self._running:
                 try:
@@ -312,8 +315,7 @@ class FeishuChannel(BaseChannel):
                 except Exception as e:
                     logger.warning("Feishu WebSocket error: {}", e)
                 if self._running:
-                    import time
-                    time.sleep(5)
+                    self._stop_event.wait(timeout=5)
 
         self._ws_thread = threading.Thread(target=run_ws, daemon=True)
         self._ws_thread.start()
@@ -328,6 +330,7 @@ class FeishuChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the Feishu bot."""
         self._running = False
+        self._stop_event.set()  # Wake up reconnect sleep immediately
         if self._ws_client:
             try:
                 self._ws_client.stop()

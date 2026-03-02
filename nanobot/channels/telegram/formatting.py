@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from nanobot.utils.text import split_message  # noqa: F401
+
 
 def _looks_like_html(text: str) -> bool:
     """Check if text already contains Telegram HTML tags."""
@@ -99,50 +101,3 @@ def markdown_to_telegram_html(text: str) -> str:
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
 
     return text
-
-
-def split_message(
-    content: str,
-    max_len: int = 4000,
-    mode: str = "newline",
-) -> list[str]:
-    """Split content into chunks within max_len.
-
-    Args:
-        content: Text to split.
-        max_len: Maximum characters per chunk (Telegram limit is 4096).
-        mode: ``"newline"`` prefers line-break boundaries (paragraph-aware);
-              ``"length"`` does a hard cut at max_len.
-    """
-    if len(content) <= max_len:
-        return [content]
-
-    chunks: list[str] = []
-    while content:
-        if len(content) <= max_len:
-            chunks.append(content)
-            break
-
-        cut = content[:max_len]
-
-        if mode == "newline":
-            # Prefer double-newline (paragraph), then single newline, then space
-            pos = cut.rfind("\n\n")
-            if pos == -1:
-                pos = cut.rfind("\n")
-            if pos == -1:
-                pos = cut.rfind(" ")
-            if pos == -1:
-                pos = max_len
-        else:
-            # "length" mode: prefer newline, then space, then hard cut
-            pos = cut.rfind("\n")
-            if pos == -1:
-                pos = cut.rfind(" ")
-            if pos == -1:
-                pos = max_len
-
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
-
-    return chunks

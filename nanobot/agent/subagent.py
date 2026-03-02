@@ -3,6 +3,7 @@
 import asyncio
 import json
 import uuid
+from collections import deque
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.profiles import get_allowed_tools
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
@@ -21,14 +23,6 @@ from nanobot.providers.base import LLMProvider
 THINKING_STYLE: dict[str, float] = {"creative": 1.0, "balanced": 0.7, "precise": 0.3}
 PERSISTENCE: dict[str, int] = {"quick": 5, "normal": 15, "thorough": 30}
 RESPONSE_LENGTH: dict[str, int] = {"brief": 2048, "normal": 4096, "detailed": 8192}
-
-# Legacy role tools (used as fallback when no effective role config exists)
-ROLE_TOOLS: dict[str, set[str]] = {
-    "researcher": {"read_file", "list_dir", "web_search", "web_fetch"},
-    "coder": {"read_file", "write_file", "edit_file", "list_dir", "exec", "web_search", "web_fetch"},
-    "reviewer": {"read_file", "list_dir"},
-    "general": set(),  # empty means all registered tools
-}
 
 
 class SubagentManager:
@@ -62,7 +56,7 @@ class SubagentManager:
         self.subagent_config = subagent_config or SubAgentConfig()
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
-        self._completed_tasks: list[dict[str, Any]] = []  # recent completed tasks for monitoring
+        self._completed_tasks: deque[dict[str, Any]] = deque(maxlen=50)
 
     async def spawn(
         self,
@@ -136,13 +130,14 @@ class SubagentManager:
             WebFetchTool(),
         ]
 
-        # Check effective role config for tools list first, fall back to legacy ROLE_TOOLS
+        # Resolve allowed tools: explicit config > profile > role mapping
         effective_roles = self.subagent_config.get_effective_roles()
         eff_role = effective_roles.get(role)
-        if eff_role and eff_role.tools:
-            allowed = set(eff_role.tools)
-        else:
-            allowed = ROLE_TOOLS.get(role, set())
+        allowed = get_allowed_tools(
+            profile=getattr(eff_role, "tool_profile", None) if eff_role else None,
+            role=role,
+            explicit_tools=eff_role.tools if (eff_role and eff_role.tools) else None,
+        )
 
         for tool in all_tools:
             if not allowed or tool.name in allowed:
@@ -161,15 +156,7 @@ class SubagentManager:
         try:
             await connect_mcp_servers(self.mcp_servers, tools, stack)
 
-            # If role has tool restrictions, remove MCP tools not in the allowed set
-            # (but MCP tools like nmem_* are always allowed for researcher/reviewer roles)
-            effective_roles = self.subagent_config.get_effective_roles()
-            eff_role = effective_roles.get(role)
-            allowed = set(eff_role.tools) if (eff_role and eff_role.tools) else ROLE_TOOLS.get(role, set())
-            if allowed:
-                # MCP tools (e.g. nmem_*) are allowed for roles that include read-only access
-                # We keep all MCP tools — they are specifically why we connect MCP servers
-                pass
+            # MCP tools are always allowed — they are specifically why we connect MCP servers
         except Exception as e:
             logger.warning("Subagent MCP connection failed (continuing without): {}", e)
 
@@ -389,8 +376,6 @@ When you have completed the task, provide a clear summary of your findings or ac
             "status": status,
             "completedAt": datetime.now().isoformat(),
         })
-        if len(self._completed_tasks) > 50:
-            self._completed_tasks = self._completed_tasks[-50:]
 
     def get_tasks_info(self) -> dict[str, Any]:
         """Get info about running and recently completed tasks."""

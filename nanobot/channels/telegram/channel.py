@@ -26,6 +26,9 @@ from nanobot.channels.telegram.retry import RetryHelper
 from nanobot.channels.telegram.streaming import StreamingManager
 from nanobot.config.schema import TelegramConfig, TelegramGroupConfig
 
+_MAX_MEDIA_GROUP_BUFFERS = 100
+_MEDIA_GROUP_TTL_S = 30.0
+
 
 class TelegramChannel(BaseChannel):
     """Telegram channel using long polling or webhook.
@@ -609,6 +612,9 @@ class TelegramChannel(BaseChannel):
         if media_group_id := getattr(message, "media_group_id", None):
             key = f"{str_chat_id}:{media_group_id}"
             if key not in self._media_group_buffers:
+                # Evict oldest buffers if over cap
+                if len(self._media_group_buffers) >= _MAX_MEDIA_GROUP_BUFFERS:
+                    self._flush_stale_media_groups()
                 self._media_group_buffers[key] = {
                     "sender_id": sender_id,
                     "chat_id": str_chat_id,
@@ -617,6 +623,7 @@ class TelegramChannel(BaseChannel):
                     "addressed": addressed,
                     "metadata": metadata,
                     "session_key": session_key,
+                    "_created_at": asyncio.get_event_loop().time(),
                 }
                 if addressed:
                     self._start_typing(str_chat_id)
@@ -761,6 +768,21 @@ class TelegramChannel(BaseChannel):
             )
         finally:
             self._media_group_tasks.pop(key, None)
+
+    def _flush_stale_media_groups(self) -> None:
+        """Remove media group buffers older than TTL to prevent unbounded growth."""
+        now = asyncio.get_event_loop().time()
+        stale = [
+            k for k, v in self._media_group_buffers.items()
+            if now - v.get("_created_at", 0) > _MEDIA_GROUP_TTL_S
+        ]
+        for k in stale:
+            self._media_group_buffers.pop(k, None)
+            task = self._media_group_tasks.pop(k, None)
+            if task and not task.done():
+                task.cancel()
+        if stale:
+            logger.debug("Flushed {} stale media group buffers", len(stale))
 
     # --- typing indicators ---
 

@@ -1,7 +1,6 @@
 """Configuration loading utilities."""
 
 import json
-import secrets
 from pathlib import Path
 
 from loguru import logger

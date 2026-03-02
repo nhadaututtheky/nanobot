@@ -119,7 +119,6 @@ def onboard() -> None:
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
-    from nanobot.providers.claude_cli_provider import ClaudeCLIProvider
     from nanobot.providers.custom_provider import CustomProvider
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
@@ -131,17 +130,6 @@ def _make_provider(config: Config):
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
-
-    # Claude CLI (subscription-based, no API key)
-    if provider_name == "claude_cli" or model.startswith("claude-cli/"):
-        cli_cfg = config.providers.claude_cli
-        return ClaudeCLIProvider(
-            default_model=model,
-            project_dir=cli_cfg.project_dir or None,
-            permission_mode=cli_cfg.permission_mode,
-            timeout=float(cli_cfg.timeout),
-            mcp_servers=config.tools.mcp_servers or None,
-        )
 
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     if provider_name == "custom":
@@ -565,11 +553,10 @@ def status() -> None:
             if spec.is_oauth:
                 console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
             elif spec.is_direct:
-                from nanobot.providers.claude_cli_provider import _get_cli_path
-                if _get_cli_path():
-                    console.print(f"{spec.label}: [green]✓ (CLI installed)[/green]")
+                if p.api_base:
+                    console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
                 else:
-                    console.print(f"{spec.label}: [yellow]CLI not found[/yellow]")
+                    console.print(f"{spec.label}: [dim]not configured[/dim]")
             elif spec.is_local:
                 if p.api_base:
                     console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")

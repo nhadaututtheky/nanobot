@@ -8,7 +8,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from telegram import Bot, Update
+from telegram import Update
 from telegram.ext import Application, MessageHandler, filters
 
 from nanobot.channels.telegram.formatting import markdown_to_telegram_html, split_message

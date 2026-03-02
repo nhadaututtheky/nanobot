@@ -1,15 +1,36 @@
 """Session management for conversation history."""
 
+import hashlib
 import json
 import shutil
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from nanobot.utils.helpers import ensure_dir, safe_filename
+
+# Word lists for human-readable session slugs
+_ADJECTIVES = (
+    "brave", "calm", "cool", "eager", "fast", "keen", "neat", "slim",
+    "wise", "bold", "deep", "fair", "gold", "kind", "pure", "warm",
+)
+_NOUNS = (
+    "fox", "owl", "elk", "bee", "ray", "oak", "gem", "arc",
+    "sky", "bay", "dew", "fin", "ivy", "jet", "kit", "orb",
+)
+
+
+def _make_slug(key: str) -> str:
+    """Generate a deterministic human-readable slug from a session key."""
+    h = int(hashlib.md5(key.encode()).hexdigest(), 16)  # noqa: S324
+    adj = _ADJECTIVES[h % len(_ADJECTIVES)]
+    noun = _NOUNS[(h >> 8) % len(_NOUNS)]
+    num = (h >> 16) % 100
+    prefix = key.split(":")[0][:2] if ":" in key else "s"
+    return f"{prefix}-{adj}-{noun}-{num}"
 
 
 @dataclass
@@ -30,6 +51,11 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
+
+    @property
+    def slug(self) -> str:
+        """Human-readable display ID (e.g. 'tg-brave-fox-42')."""
+        return _make_slug(self.key)
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
@@ -77,12 +103,15 @@ class SessionManager:
     """
 
     MAX_CACHED_SESSIONS = 50
+    MAX_DISK_SESSIONS = 200
+    MAX_AGE_DAYS = 30
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
         self.sessions_dir = ensure_dir(self.workspace / "sessions")
         self.legacy_sessions_dir = Path.home() / ".nanobot" / "sessions"
         self._cache: dict[str, Session] = {}
+        self._cleanup_disk()
 
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session (path-traversal safe)."""
@@ -221,6 +250,7 @@ class SessionManager:
                             key = data.get("key") or path.stem.replace("_", ":", 1)
                             sessions.append({
                                 "key": key,
+                                "slug": _make_slug(key),
                                 "created_at": data.get("created_at"),
                                 "updated_at": data.get("updated_at"),
                                 "path": str(path)
@@ -229,3 +259,52 @@ class SessionManager:
                 continue
 
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+
+    def _cleanup_disk(self) -> None:
+        """Remove old session files on startup: by age and by count."""
+        try:
+            session_files = list(self.sessions_dir.glob("*.jsonl"))
+            if not session_files:
+                return
+
+            cutoff = datetime.now() - timedelta(days=self.MAX_AGE_DAYS)
+            removed_age = 0
+
+            # Collect (path, updated_at) for sorting
+            file_times: list[tuple[Path, datetime]] = []
+            for path in session_files:
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        first_line = f.readline().strip()
+                    if not first_line:
+                        continue
+                    data = json.loads(first_line)
+                    updated = data.get("updated_at")
+                    if updated:
+                        dt = datetime.fromisoformat(updated)
+                        if dt < cutoff:
+                            path.unlink(missing_ok=True)
+                            removed_age += 1
+                            continue
+                        file_times.append((path, dt))
+                    else:
+                        file_times.append((path, datetime.fromtimestamp(path.stat().st_mtime)))
+                except Exception:
+                    continue
+
+            # Remove excess by count (keep most recent MAX_DISK_SESSIONS)
+            removed_count = 0
+            if len(file_times) > self.MAX_DISK_SESSIONS:
+                file_times.sort(key=lambda x: x[1])
+                excess = len(file_times) - self.MAX_DISK_SESSIONS
+                for path, _ in file_times[:excess]:
+                    path.unlink(missing_ok=True)
+                    removed_count += 1
+
+            if removed_age or removed_count:
+                logger.info(
+                    "Session cleanup: removed {} expired + {} excess (max {})",
+                    removed_age, removed_count, self.MAX_DISK_SESSIONS,
+                )
+        except Exception as e:
+            logger.warning("Session disk cleanup failed: {}", e)

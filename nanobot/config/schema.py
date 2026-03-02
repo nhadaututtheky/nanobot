@@ -1,17 +1,55 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
+
+_T = TypeVar("_T", bound="Base")
 
 
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+def _merge_role_defaults(
+    builtins: dict[str, dict[str, Any]],
+    overrides: dict[str, _T],
+    cls: type[_T],
+) -> dict[str, _T]:
+    """Merge builtin role defaults with user overrides.
+
+    Pattern: builtin defaults → override non-falsy values on top → preserve list fields.
+    """
+    result: dict[str, _T] = {}
+
+    for role_id, defaults in builtins.items():
+        base = cls(**defaults)
+        if role_id in overrides:
+            override = overrides[role_id]
+            merged = {
+                **base.model_dump(),
+                **{k: v for k, v in override.model_dump().items() if v},
+            }
+            merged["builtin"] = defaults.get("builtin", False)
+            # Preserve list fields from override if non-empty
+            for k, v in override.model_dump().items():
+                if isinstance(v, list) and v:
+                    merged[k] = v
+            result[role_id] = cls(**merged)
+        else:
+            result[role_id] = base
+
+    # Custom roles not in builtins
+    for role_id, role_cfg in overrides.items():
+        if role_id not in builtins:
+            result[role_id] = role_cfg
+
+    return result
 
 
 class WhatsAppConfig(Base):
@@ -84,7 +122,8 @@ class SubAgentRoleConfig(RoleConfig):
     persistence: str = ""  # "quick" | "normal" | "thorough" → maps to max_iterations
     response_length: str = ""  # "brief" | "normal" | "detailed" → maps to max_tokens
     max_iterations: int = 0  # 0 = inherit defaults
-    tools: list[str] = Field(default_factory=list)  # legacy tool whitelist
+    tool_profile: str = ""  # "minimal" | "coding" | "messaging" | "full"
+    tools: list[str] = Field(default_factory=list)  # explicit tool whitelist (overrides profile)
 
     # Telegram identity (optional, for orchestrator multi-bot posting)
     telegram_bot_token: str = ""  # Bot token for this role (empty = use main bot)
@@ -207,33 +246,7 @@ class TelegramTeamGroupConfig(Base):
 
     def get_effective_team_roles(self) -> dict[str, TeamRoleConfig]:
         """Merge BUILTIN_TEAM_ROLES defaults with user overrides + custom roles."""
-        result: dict[str, TeamRoleConfig] = {}
-
-        for role_id, defaults in BUILTIN_TEAM_ROLES.items():
-            base = TeamRoleConfig(**defaults)
-            if role_id in self.team_roles:
-                override = self.team_roles[role_id]
-                merged = {
-                    **base.model_dump(),
-                    **{k: v for k, v in override.model_dump().items() if v},
-                }
-                merged["builtin"] = defaults.get("builtin", False)
-                if override.strengths:
-                    merged["strengths"] = override.strengths
-                if override.allowed_tools:
-                    merged["allowed_tools"] = override.allowed_tools
-                if override.denied_tools:
-                    merged["denied_tools"] = override.denied_tools
-                result[role_id] = TeamRoleConfig(**merged)
-            else:
-                result[role_id] = base
-
-        # Custom roles not in builtins
-        for role_id, role_cfg in self.team_roles.items():
-            if role_id not in BUILTIN_TEAM_ROLES:
-                result[role_id] = role_cfg
-
-        return result
+        return _merge_role_defaults(BUILTIN_TEAM_ROLES, self.team_roles, TeamRoleConfig)
 
 
 class TelegramConfig(Base):
@@ -503,35 +516,7 @@ class SubAgentConfig(Base):
 
     def get_effective_roles(self) -> dict[str, SubAgentRoleConfig]:
         """Merge BUILTIN_ROLES defaults with user overrides + custom roles."""
-        result: dict[str, SubAgentRoleConfig] = {}
-
-        # Start with builtin defaults
-        for role_id, defaults in BUILTIN_ROLES.items():
-            base = SubAgentRoleConfig(**defaults)
-            # Merge user overrides on top
-            if role_id in self.roles:
-                override = self.roles[role_id]
-                merged = {
-                    **base.model_dump(),
-                    **{k: v for k, v in override.model_dump().items() if v},
-                }
-                # Preserve builtin flag from defaults
-                merged["builtin"] = defaults.get("builtin", False)
-                # Keep empty-ish fields from override if they were explicitly set
-                if override.tools:
-                    merged["tools"] = override.tools
-                if override.strengths:
-                    merged["strengths"] = override.strengths
-                result[role_id] = SubAgentRoleConfig(**merged)
-            else:
-                result[role_id] = base
-
-        # Add any custom roles not in builtins
-        for role_id, role_cfg in self.roles.items():
-            if role_id not in BUILTIN_ROLES:
-                result[role_id] = role_cfg
-
-        return result
+        return _merge_role_defaults(BUILTIN_ROLES, self.roles, SubAgentRoleConfig)
 
 
 class ModelCapabilityConfig(Base):
