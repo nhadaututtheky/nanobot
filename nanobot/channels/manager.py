@@ -24,6 +24,7 @@ _CHANNEL_REGISTRY: tuple[tuple[str, str, str], ...] = (
     ("slack", "nanobot.channels.slack", "SlackChannel"),
     ("qq", "nanobot.channels.qq", "QQChannel"),
     ("telegram_userbot", "nanobot.channels.telegram_userbot", "TelegramUserbotChannel"),
+    ("zalo", "nanobot.channels.zalo", "ZaloChannel"),
     ("matrix", "nanobot.channels.matrix", "MatrixChannel"),
 )
 

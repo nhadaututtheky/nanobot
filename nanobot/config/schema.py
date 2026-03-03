@@ -458,6 +458,20 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
+class ZaloConfig(Base):
+    """Zalo Official Account channel configuration."""
+
+    enabled: bool = False
+    app_id: str = ""  # Zalo app ID from developers.zalo.me
+    app_secret: str = ""  # Zalo app secret
+    access_token: str = ""  # OA access token (auto-refreshed at runtime)
+    refresh_token: str = ""  # OA refresh token (single-use, 3-month lifetime)
+    webhook_secret: str = ""  # X-Bot-Api-Secret-Token for webhook verification
+    webhook_port: int = 8444  # Port for webhook HTTP server
+    oa_id: str = ""  # Official Account ID
+    allow_from: list[str] = Field(default_factory=list)  # Allowed Zalo user IDs
+
+
 class TelegramUserbotConfig(Base):
     """Telegram userbot (Telethon MTProto) configuration for observing bot messages."""
 
@@ -488,6 +502,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    zalo: ZaloConfig = Field(default_factory=ZaloConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 

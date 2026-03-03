@@ -24,6 +24,7 @@ from rich.console import Console
 
 from nanobot import __logo__, __version__
 from nanobot.cli.channels import channels_app
+from nanobot.cli.config_cmd import config_app
 from nanobot.cli.cron import cron_app
 from nanobot.cli.input import (
     _flush_pending_tty_input,
@@ -43,6 +44,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(channels_app, name="channels")
+app.add_typer(config_app, name="config")
 app.add_typer(cron_app, name="cron")
 app.add_typer(provider_app, name="provider")
 
@@ -191,7 +193,10 @@ def gateway(
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
-    session_manager = SessionManager(config.workspace_path)
+
+    from nanobot.bus.event_bus import EventBus
+    event_bus = EventBus()
+    session_manager = SessionManager(config.workspace_path, event_bus=event_bus)
 
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
@@ -314,6 +319,12 @@ def gateway(
         broadcaster=broadcaster,
         orchestrator=agent_loop.get_orchestrator_context(),
     )
+    # Wire session lifecycle events → WS broadcaster
+    async def _session_event_handler(event: str, payload: dict) -> None:
+        await broadcaster.broadcast(event, payload)
+    for evt in ("session.created", "session.message", "session.ended"):
+        event_bus.subscribe(evt, _session_event_handler)
+
     # Wire orchestrator broadcast callback to WS broadcaster
     orch_ctx = agent_loop.get_orchestrator_context()
     if orch_ctx and orch_ctx.get("executor"):

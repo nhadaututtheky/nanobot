@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from contextlib import AsyncExitStack
 from datetime import datetime
 from pathlib import Path
@@ -18,12 +19,41 @@ from nanobot.orchestrator.models import (
     TaskStatus,
 )
 
+_ARTIFACTS_RE = re.compile(r"<artifacts>\s*(.*?)\s*</artifacts>", re.DOTALL)
+_MAX_OUTPUT_FILES = 20
+
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
     from nanobot.config.schema import Config
     from nanobot.orchestrator.store import GraphStore
     from nanobot.orchestrator.telegram_sender import TelegramOrchestratorSender
     from nanobot.providers.base import LLMProvider
+
+
+def _extract_artifacts(result: str) -> tuple[str, list[str]]:
+    """Parse ``<artifacts>path1\\npath2</artifacts>`` from LLM result.
+
+    Returns ``(clean_result, [relative_paths])``.  Paths with ``..`` components
+    or absolute paths are silently dropped (security).
+    """
+    match = _ARTIFACTS_RE.search(result)
+    if not match:
+        return result, []
+
+    raw_lines = match.group(1).strip().splitlines()
+    paths: list[str] = []
+    for line in raw_lines:
+        p = line.strip()
+        if not p or p.startswith("#"):
+            continue
+        # Security: reject absolute paths and traversal
+        if p.startswith("/") or p.startswith("\\") or ".." in p:
+            logger.warning("Artifact path rejected (traversal): {}", p)
+            continue
+        paths.append(p)
+
+    clean = _ARTIFACTS_RE.sub("", result).strip()
+    return clean, paths[:_MAX_OUTPUT_FILES]
 
 
 class GraphExecutor:
@@ -100,7 +130,8 @@ class GraphExecutor:
                     if inflight:
                         # Wait for at least one running task to finish (event-driven)
                         _done, inflight = await asyncio.wait(
-                            inflight, return_when=asyncio.FIRST_COMPLETED,
+                            inflight,
+                            return_when=asyncio.FIRST_COMPLETED,
                         )
                         continue
 
@@ -127,7 +158,8 @@ class GraphExecutor:
 
                 # Wait for this wave to complete
                 _done, inflight = await asyncio.wait(
-                    inflight, return_when=asyncio.ALL_COMPLETED,
+                    inflight,
+                    return_when=asyncio.ALL_COMPLETED,
                 )
 
         except asyncio.CancelledError:
@@ -183,8 +215,11 @@ class GraphExecutor:
                     timeout=timeout,
                 )
 
-                node.result = result
-                node.output_summary = result[:500] if result else ""
+                # Extract artifact file declarations from result
+                clean_result, artifact_paths = _extract_artifacts(result or "")
+                node.result = clean_result or result or ""
+                node.output_summary = (clean_result or "")[:500]
+                node.output_files = artifact_paths
                 node.status = TaskStatus.COMPLETED
                 node.progress = 1.0
 
@@ -426,21 +461,38 @@ Task capability: **{node.capability.value}**
         return "\n".join(parts)
 
     def _inject_dependency_context(self, graph: TaskGraph, node: TaskNode) -> None:
-        """Inject output summaries from upstream dependencies into node's input_context."""
+        """Inject output summaries and file paths from upstream dependencies."""
         dep_ids = graph.get_dependencies(node.id)
         if not dep_ids:
             return
 
         context_parts: list[str] = []
+        all_files: list[str] = []
         for dep_id in dep_ids:
             dep_node = graph.get_node(dep_id)
-            if dep_node and dep_node.output_summary:
+            if not dep_node:
+                continue
+            if dep_node.output_summary:
                 context_parts.append(
                     f"[{dep_node.label}] ({dep_node.capability.value}):\n{dep_node.output_summary}"
                 )
+            if dep_node.output_files:
+                all_files.extend(dep_node.output_files)
 
         if context_parts:
             node.input_context = "\n\n---\n\n".join(context_parts)
+
+        if all_files:
+            node.input_files = all_files[:_MAX_OUTPUT_FILES]
+            file_listing = "\n".join(f"  - {f}" for f in node.input_files)
+            node.input_context += f"\n\n## Files from upstream tasks:\n{file_listing}"
+            if len(all_files) > _MAX_OUTPUT_FILES:
+                logger.warning(
+                    "Node {} received {} files from upstream (capped at {})",
+                    node.id,
+                    len(all_files),
+                    _MAX_OUTPUT_FILES,
+                )
 
     # --- result announcement ---
 

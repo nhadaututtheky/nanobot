@@ -72,6 +72,8 @@ class TaskNode:
     progress: float = 0.0  # 0.0 – 1.0
     input_context: str = ""  # Injected from upstream dependencies
     output_summary: str = ""  # Extracted after completion
+    output_files: list[str] = field(default_factory=list)  # Relative paths produced by this node
+    input_files: list[str] = field(default_factory=list)  # Injected from upstream dependencies
     error: str = ""
     started_at: str = ""
     completed_at: str = ""
@@ -89,6 +91,8 @@ class TaskNode:
             "progress": self.progress,
             "inputContext": self.input_context,
             "outputSummary": self.output_summary,
+            "outputFiles": self.output_files,
+            "inputFiles": self.input_files,
             "error": self.error,
             "startedAt": self.started_at,
             "completedAt": self.completed_at,
@@ -108,6 +112,8 @@ class TaskNode:
             progress=d.get("progress", 0.0),
             input_context=d.get("inputContext", d.get("input_context", "")),
             output_summary=d.get("outputSummary", d.get("output_summary", "")),
+            output_files=d.get("outputFiles", d.get("output_files", [])),
+            input_files=d.get("inputFiles", d.get("input_files", [])),
             error=d.get("error", ""),
             started_at=d.get("startedAt", d.get("started_at", "")),
             completed_at=d.get("completedAt", d.get("completed_at", "")),
