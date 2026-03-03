@@ -21,6 +21,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.usage import compute_cost
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -229,6 +230,7 @@ class AgentLoop:
         # Rebuild orchestrator router with fresh model registry
         if self.orchestrator_router is not None:
             from nanobot.orchestrator.router import ModelRouter
+
             try:
                 self.orchestrator_router = ModelRouter(config)
                 # Update decomposer's router reference
@@ -237,7 +239,10 @@ class AgentLoop:
                 # Update executor's config reference
                 if self.orchestrator_executor is not None:
                     self.orchestrator_executor._config = config
-                logger.info("Config hot-reloaded ({} models)", len(self.orchestrator_router.get_models_info()))
+                logger.info(
+                    "Config hot-reloaded ({} models)",
+                    len(self.orchestrator_router.get_models_info()),
+                )
             except Exception as e:
                 logger.warning("Orchestrator router reload failed: {}", e)
 
@@ -354,11 +359,19 @@ class AgentLoop:
                     }
                     for tc in response.tool_calls
                 ]
+                usage_dict = None
+                if response.usage:
+                    usage_dict = {
+                        **response.usage,
+                        "cost": compute_cost(self.model, response.usage),
+                    }
                 messages = self.context.add_assistant_message(
                     messages,
                     response.content,
                     tool_call_dicts,
                     reasoning_content=response.reasoning_content,
+                    usage=usage_dict,
+                    model=self.model,
                 )
 
                 for tool_call in response.tool_calls:
@@ -378,10 +391,18 @@ class AgentLoop:
                     break
 
                 clean = self._strip_think(response.content)
+                usage_dict = None
+                if response.usage:
+                    usage_dict = {
+                        **response.usage,
+                        "cost": compute_cost(self.model, response.usage),
+                    }
                 messages = self.context.add_assistant_message(
                     messages,
                     clean,
                     reasoning_content=response.reasoning_content,
+                    usage=usage_dict,
+                    model=self.model,
                 )
                 final_content = clean
                 break
@@ -683,9 +704,7 @@ class AgentLoop:
 
         # If message tool already sent a response, don't send a duplicate or error
         message_already_sent = (
-            (mt := self.tools.get("message"))
-            and isinstance(mt, MessageTool)
-            and mt._sent_in_turn
+            (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn
         )
 
         if final_content is None and not message_already_sent:

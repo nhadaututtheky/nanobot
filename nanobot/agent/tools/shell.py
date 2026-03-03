@@ -9,6 +9,90 @@ from typing import Any
 
 from nanobot.agent.tools.base import Tool
 
+# Environment variables that are always safe to pass to subprocesses
+_ENV_SAFE_KEYS: frozenset[str] = frozenset(
+    {
+        # POSIX essentials
+        "PATH",
+        "HOME",
+        "USER",
+        "SHELL",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+        "COLORTERM",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "LOGNAME",
+        "HOSTNAME",
+        # Windows essentials
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "OS",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "PROGRAMFILES",
+        "COMMONPROGRAMFILES",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+        # Dev tooling
+        "PYTHONPATH",
+        "VIRTUAL_ENV",
+        "CONDA_DEFAULT_ENV",
+        "CONDA_PREFIX",
+        "NODE_PATH",
+        "NPM_CONFIG_PREFIX",
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "EDITOR",
+        "VISUAL",
+        "PAGER",
+        # Network / proxy
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        # XDG
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_RUNTIME_DIR",
+    }
+)
+
+# Patterns that indicate sensitive environment variables
+_SECRET_RE = re.compile(
+    r"(API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH[_-]?KEY|PRIVATE[_-]?KEY)",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_env() -> dict[str, str]:
+    """Build a sanitized environment for subprocess execution.
+
+    Strategy: whitelist known-safe + block anything matching secret patterns.
+    Non-sensitive vars that aren't whitelisted are passed through.
+    """
+    env: dict[str, str] = {}
+    for key, value in os.environ.items():
+        if key in _ENV_SAFE_KEYS or key.upper() in _ENV_SAFE_KEYS:
+            env[key] = value
+        elif _SECRET_RE.search(key):
+            continue  # Block sensitive vars
+        else:
+            env[key] = value  # Pass through non-sensitive vars
+    return env
+
 
 class ExecTool(Tool):
     """Tool to execute shell commands."""
@@ -25,15 +109,15 @@ class ExecTool(Tool):
         self.timeout = timeout
         self.working_dir = working_dir
         self.deny_patterns = deny_patterns or [
-            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
-            r"\bdel\s+/[fq]\b",              # del /f, del /q
-            r"\brmdir\s+/s\b",               # rmdir /s
-            r"(?:^|[;&|]\s*)format\b",       # format (as standalone command only)
-            r"\b(mkfs|diskpart)\b",          # disk operations
-            r"\bdd\s+if=",                   # dd
-            r">\s*/dev/sd",                  # write to disk
+            r"\brm\s+-[rf]{1,2}\b",  # rm -r, rm -rf, rm -fr
+            r"\bdel\s+/[fq]\b",  # del /f, del /q
+            r"\brmdir\s+/s\b",  # rmdir /s
+            r"(?:^|[;&|]\s*)format\b",  # format (as standalone command only)
+            r"\b(mkfs|diskpart)\b",  # disk operations
+            r"\bdd\s+if=",  # dd
+            r">\s*/dev/sd",  # write to disk
             r"\b(shutdown|reboot|poweroff)\b",  # system power
-            r":\(\)\s*\{.*\};\s*:",          # fork bomb
+            r":\(\)\s*\{.*\};\s*:",  # fork bomb
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
@@ -52,16 +136,13 @@ class ExecTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute"
-                },
+                "command": {"type": "string", "description": "The shell command to execute"},
                 "working_dir": {
                     "type": "string",
-                    "description": "Optional working directory for the command"
-                }
+                    "description": "Optional working directory for the command",
+                },
             },
-            "required": ["command"]
+            "required": ["command"],
         }
 
     async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
@@ -70,7 +151,7 @@ class ExecTool(Tool):
         if guard_error:
             return guard_error
 
-        env = os.environ.copy()
+        env = _sanitize_env()
         if self.path_append:
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
 
@@ -79,6 +160,7 @@ class ExecTool(Tool):
             extra_kwargs: dict[str, Any] = {}
             if sys.platform == "win32":
                 import subprocess as _sp
+
                 extra_kwargs["creationflags"] = _sp.CREATE_NO_WINDOW
 
             process = await asyncio.create_subprocess_shell(
@@ -91,10 +173,7 @@ class ExecTool(Tool):
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=self.timeout
-                )
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self.timeout)
             except asyncio.TimeoutError:
                 process.kill()
                 # Wait for the process to fully terminate so pipes are
