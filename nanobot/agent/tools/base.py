@@ -12,7 +12,7 @@ class Tool(ABC):
     the environment, such as reading files, executing commands, etc.
     """
 
-    _TYPE_MAP = {
+    _TYPE_MAP: dict[str, type | tuple[type, ...]] = {
         "string": str,
         "integer": int,
         "number": (int, float),

@@ -229,7 +229,7 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
     # Try localized format
     for lang_key in ("zh_cn", "en_us", "ja_jp"):
         lang_content = content_json.get(lang_key)
-        text, images = extract_from_lang(lang_content)
+        text, images = extract_from_lang(lang_content)  # type: ignore[arg-type]
         if text or images:
             return text or "", images
 
@@ -430,7 +430,7 @@ class FeishuChannel(BaseChannel):
             text = m.group(2).strip()
             elements.append({
                 "tag": "div",
-                "text": {
+                "text": {  # type: ignore[dict-item]
                     "tag": "lark_md",
                     "content": f"**{text}**",
                 },

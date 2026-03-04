@@ -77,6 +77,8 @@ class QQChannel(BaseChannel):
         """Run the bot connection with auto-reconnect."""
         while self._running:
             try:
+                if self._client is None:
+                    return
                 await self._client.start(appid=self.config.app_id, secret=self.config.secret)
             except Exception as e:
                 logger.warning("QQ bot error: {}", e)

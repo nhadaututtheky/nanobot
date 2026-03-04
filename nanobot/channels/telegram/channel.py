@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from typing import Any
 
 from loguru import logger
 from telegram import BotCommand, ReplyParameters, Update
@@ -209,6 +210,7 @@ class TelegramChannel(BaseChannel):
             )
             await self._webhook_runner.start()  # type: ignore[union-attr]
         else:
+            assert self._app.updater is not None
             await self._app.updater.start_polling(
                 allowed_updates=self.config.allowed_updates,
                 drop_pending_updates=True,
@@ -232,12 +234,12 @@ class TelegramChannel(BaseChannel):
         self._media_group_buffers.clear()
 
         if self._webhook_runner is not None:
-            await self._webhook_runner.stop()  # type: ignore[union-attr]
+            await self._webhook_runner.stop()  # type: ignore[attr-defined]
             self._webhook_runner = None
 
         if self._app:
             logger.info("Stopping Telegram bot...")
-            if self._app.updater.running:
+            if self._app.updater and self._app.updater.running:
                 await self._app.updater.stop()
             await self._app.stop()
             await self._app.shutdown()
@@ -492,8 +494,8 @@ class TelegramChannel(BaseChannel):
             content_parts.append(message.caption)
 
         # Handle media files
-        media_file = None
-        media_type = None
+        media_file: Any = None
+        media_type: str | None = None
 
         if message.photo:
             media_file = message.photo[-1]
@@ -590,6 +592,8 @@ class TelegramChannel(BaseChannel):
             "first_name": user.first_name,
             "is_group": is_group,
         }
+        if message.reply_to_message:
+            metadata["reply_to_message_id"] = message.reply_to_message.message_id
 
         # Forum/topic support
         thread_id = getattr(message, "message_thread_id", None)
@@ -602,6 +606,11 @@ class TelegramChannel(BaseChannel):
             if gcfg.system_prompt:
                 metadata["system_prompt_override"] = gcfg.system_prompt
             metadata["history_limit"] = gcfg.history_limit or self.config.history_limit
+            if gcfg.allowed_tools or gcfg.denied_tools:
+                metadata["tool_restrictions"] = {
+                    "allowed": gcfg.allowed_tools,
+                    "denied": gcfg.denied_tools,
+                }
         else:
             metadata["history_limit"] = self.config.dm.history_limit or self.config.history_limit
 
@@ -706,7 +715,7 @@ class TelegramChannel(BaseChannel):
         await query.answer()
 
         sender_id = self._sender_id(query.from_user)
-        chat_id = str(query.message.chat_id) if query.message else ""
+        chat_id = str(query.message.chat.id) if query.message else ""
         if not chat_id:
             return
 

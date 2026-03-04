@@ -142,6 +142,7 @@ def _make_provider(config: Config):
         )
 
     from nanobot.providers.registry import find_by_name
+    assert provider_name is not None
     spec = find_by_name(provider_name)
     if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and (spec.is_oauth or spec.is_direct)):
         console.print("[red]Error: No API key configured.[/red]")
@@ -201,6 +202,12 @@ def gateway(
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
+
+    # Ensure default cron jobs from config
+    if config.cron.default_jobs:
+        cron.ensure_default_jobs([
+            j.model_dump() for j in config.cron.default_jobs
+        ])
 
     # Create agent with cron service
     agent_loop = AgentLoop(

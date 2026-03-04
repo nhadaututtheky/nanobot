@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from typing import Any
 
 from loguru import logger
 
@@ -24,7 +25,7 @@ class WhatsAppChannel(BaseChannel):
     def __init__(self, config: WhatsAppConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: WhatsAppConfig = config
-        self._ws = None
+        self._ws: Any = None
         self._connected = False
 
     async def start(self) -> None:
@@ -50,7 +51,7 @@ class WhatsAppChannel(BaseChannel):
                     # Listen for messages
                     async for message in ws:
                         try:
-                            await self._handle_bridge_message(message)
+                            await self._handle_bridge_message(str(message))
                         except Exception as e:
                             logger.error("Error handling bridge message: {}", e)
 

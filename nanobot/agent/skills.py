@@ -23,17 +23,24 @@ class SkillsLoader:
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
 
-    def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
+    def list_skills(
+        self,
+        filter_unavailable: bool = True,
+        granted_skills: list[str] | None = None,
+    ) -> list[dict[str, str]]:
         """
         List all available skills.
 
         Args:
             filter_unavailable: If True, filter out skills with unmet requirements.
+            granted_skills: If non-empty, only include these skill names (grant-based access).
+                            Empty list or None = no filtering (all skills accessible).
 
         Returns:
             List of skill info dicts with 'name', 'path', 'source'.
         """
         skills = []
+        grant_set = set(granted_skills) if granted_skills else None
 
         # Workspace skills (highest priority)
         if self.workspace_skills.exists():
@@ -41,6 +48,8 @@ class SkillsLoader:
                 if skill_dir.is_dir():
                     skill_file = skill_dir / "SKILL.md"
                     if skill_file.exists():
+                        if grant_set and skill_dir.name not in grant_set:
+                            continue
                         skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "workspace"})
 
         # Built-in skills
@@ -49,6 +58,8 @@ class SkillsLoader:
                 if skill_dir.is_dir():
                     skill_file = skill_dir / "SKILL.md"
                     if skill_file.exists() and not any(s["name"] == skill_dir.name for s in skills):
+                        if grant_set and skill_dir.name not in grant_set:
+                            continue
                         skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "builtin"})
 
         # Filter by requirements
@@ -98,17 +109,20 @@ class SkillsLoader:
 
         return "\n\n---\n\n".join(parts) if parts else ""
 
-    def build_skills_summary(self) -> str:
+    def build_skills_summary(self, granted_skills: list[str] | None = None) -> str:
         """
         Build a summary of all skills (name, description, path, availability).
 
         This is used for progressive loading - the agent can read the full
         skill content using read_file when needed.
 
+        Args:
+            granted_skills: If non-empty, only include these skill names.
+
         Returns:
             XML-formatted skills summary.
         """
-        all_skills = self.list_skills(filter_unavailable=False)
+        all_skills = self.list_skills(filter_unavailable=False, granted_skills=granted_skills)
         if not all_skills:
             return ""
 
@@ -170,7 +184,9 @@ class SkillsLoader:
         """Parse skill metadata JSON from frontmatter (supports nanobot and openclaw keys)."""
         try:
             data = json.loads(raw)
-            return data.get("nanobot", data.get("openclaw", {})) if isinstance(data, dict) else {}
+            if isinstance(data, dict):
+                return data.get("nanobot") or data.get("openclaw") or {}
+            return {}
         except (json.JSONDecodeError, TypeError):
             return {}
 

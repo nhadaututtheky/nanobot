@@ -127,10 +127,10 @@ class _NioLoguruHandler(logging.Handler):
         try:
             level = logger.level(record.levelname).name
         except ValueError:
-            level = record.levelno
+            level = record.levelno  # type: ignore[assignment]
         frame, depth = logging.currentframe(), 2
         while frame and frame.f_code.co_filename == logging.__file__:
-            frame, depth = frame.f_back, depth + 1
+            frame, depth = frame.f_back, depth + 1  # type: ignore[assignment]
         logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
@@ -376,11 +376,13 @@ class MatrixChannel(BaseChannel):
                 await self._stop_typing_keepalive(msg.chat_id, clear_typing=True)
 
     def _register_event_callbacks(self) -> None:
+        assert self.client is not None
         self.client.add_event_callback(self._on_message, RoomMessageText)
         self.client.add_event_callback(self._on_media_message, MATRIX_MEDIA_EVENT_FILTER)
         self.client.add_event_callback(self._on_room_invite, InviteEvent)
 
     def _register_response_callbacks(self) -> None:
+        assert self.client is not None
         self.client.add_response_callback(self._on_sync_error, SyncError)
         self.client.add_response_callback(self._on_join_error, JoinError)
         self.client.add_response_callback(self._on_send_error, RoomSendError)
@@ -443,6 +445,7 @@ class MatrixChannel(BaseChannel):
     async def _sync_loop(self) -> None:
         while self._running:
             try:
+                assert self.client is not None
                 await self.client.sync_forever(timeout=30000, full_state=True)
             except asyncio.CancelledError:
                 break
@@ -452,6 +455,7 @@ class MatrixChannel(BaseChannel):
     async def _on_room_invite(self, room: MatrixRoom, event: InviteEvent) -> None:
         allow_from = self.config.allow_from or []
         if not allow_from or event.sender in allow_from:
+            assert self.client is not None
             await self.client.join(room.room_id)
 
     def _is_direct_room(self, room: MatrixRoom) -> bool:
@@ -529,7 +533,7 @@ class MatrixChannel(BaseChannel):
 
     def _event_attachment_type(self, event: MatrixMediaEvent) -> str:
         msgtype = self._event_source_content(event).get("msgtype")
-        return _MSGTYPE_MAP.get(msgtype, "file")
+        return _MSGTYPE_MAP.get(str(msgtype or ""), "file")
 
     @staticmethod
     def _is_encrypted_media_event(event: MatrixMediaEvent) -> bool:
@@ -627,7 +631,7 @@ class MatrixChannel(BaseChannel):
         encrypted = self._is_encrypted_media_event(event)
         data = downloaded
         if encrypted:
-            if (data := self._decrypt_media_bytes(event, downloaded)) is None:
+            if (data := self._decrypt_media_bytes(event, downloaded)) is None:  # type: ignore[assignment]
                 return None, fail
 
         if len(data) > limit_bytes:

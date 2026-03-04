@@ -23,13 +23,25 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = 3
 
 
+_MAX_CONNECTIONS = 50
+_active_connections: set[str] = set()
+
+
 async def start_gateway(ctx: GatewayContext, dispatcher: Dispatcher) -> None:
     """Start the WS server and serve forever."""
     host = ctx.config.gateway.host
     port = ctx.config.gateway.port
 
     async def handler(ws: ServerConnection) -> None:
-        await _handle_connection(ctx, dispatcher, ws)
+        if len(_active_connections) >= _MAX_CONNECTIONS:
+            await ws.close(4029, "too many connections")
+            return
+        conn_id = uuid4().hex[:12]
+        _active_connections.add(conn_id)
+        try:
+            await _handle_connection(ctx, dispatcher, ws, conn_id)
+        finally:
+            _active_connections.discard(conn_id)
 
     logger.info("gateway listening on ws://%s:%s", host, port)
     async with websockets.serve(handler, host, port, ping_interval=30, ping_timeout=10, max_size=2 * 1024 * 1024):
@@ -40,9 +52,11 @@ async def _handle_connection(
     ctx: GatewayContext,
     dispatcher: Dispatcher,
     ws: ServerConnection,
+    conn_id: str | None = None,
 ) -> None:
     """Handle a single WebSocket connection lifecycle."""
-    conn_id = uuid4().hex[:12]
+    if conn_id is None:
+        conn_id = uuid4().hex[:12]
     conn = ClientConnection(ws, conn_id)
 
     # Step 1: Send challenge

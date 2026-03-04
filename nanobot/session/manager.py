@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import shutil
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -139,7 +140,7 @@ class SessionManager:
         self.workspace = workspace
         self.sessions_dir = ensure_dir(self.workspace / "sessions")
         self.legacy_sessions_dir = Path.home() / ".nanobot" / "sessions"
-        self._cache: dict[str, Session] = {}
+        self._cache: OrderedDict[str, Session] = OrderedDict()
         self._event_bus = event_bus
         self._cleanup_disk()
 
@@ -177,6 +178,7 @@ class SessionManager:
             The session.
         """
         if key in self._cache:
+            self._cache.move_to_end(key)
             return self._cache[key]
 
         loaded = self._load(key)
@@ -192,17 +194,9 @@ class SessionManager:
         return loaded
 
     def _evict_if_needed(self) -> None:
-        """Evict oldest sessions from cache when over limit."""
-        if len(self._cache) <= self.MAX_CACHED_SESSIONS:
-            return
-        # Sort by updated_at, evict oldest
-        sorted_keys = sorted(
-            self._cache,
-            key=lambda k: self._cache[k].updated_at,
-        )
-        to_evict = len(self._cache) - self.MAX_CACHED_SESSIONS
-        for k in sorted_keys[:to_evict]:
-            del self._cache[k]
+        """Evict least-recently-used sessions from cache when over limit."""
+        while len(self._cache) > self.MAX_CACHED_SESSIONS:
+            self._cache.popitem(last=False)
 
     def _load(self, key: str) -> Session | None:
         """Load a session from disk."""
@@ -255,24 +249,27 @@ class SessionManager:
             logger.warning("Failed to load session {}: {}", key, e)
             return None
 
-    def save(self, session: Session) -> None:
-        """Save a session to disk."""
+    async def save(self, session: Session) -> None:
+        """Save a session to disk (non-blocking)."""
         path = self._get_session_path(session.key)
 
-        with open(path, "w", encoding="utf-8") as f:
-            metadata_line = {
-                "_type": "metadata",
-                "key": session.key,
-                "created_at": session.created_at.isoformat(),
-                "updated_at": session.updated_at.isoformat(),
-                "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated,
-            }
-            f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-            for msg in session.messages:
-                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        def _write() -> None:
+            with open(path, "w", encoding="utf-8") as f:
+                metadata_line = {
+                    "_type": "metadata",
+                    "key": session.key,
+                    "created_at": session.created_at.isoformat(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "metadata": session.metadata,
+                    "last_consolidated": session.last_consolidated,
+                }
+                f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
+                for msg in session.messages:
+                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
+        await asyncio.to_thread(_write)
         self._cache[session.key] = session
+        self._evict_if_needed()
         self._emit_event(
             "session.message",
             {

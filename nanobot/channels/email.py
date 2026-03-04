@@ -237,7 +237,7 @@ class EmailChannel(BaseChannel):
         if self.config.imap_use_ssl:
             client = imaplib.IMAP4_SSL(self.config.imap_host, self.config.imap_port)
         else:
-            client = imaplib.IMAP4(self.config.imap_host, self.config.imap_port)
+            client = imaplib.IMAP4(self.config.imap_host, self.config.imap_port)  # type: ignore[assignment]
 
         try:
             client.login(self.config.imap_username, self.config.imap_password)

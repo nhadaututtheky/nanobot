@@ -68,7 +68,7 @@ class OrchestrateTool(Tool):
             "required": ["goal"],
         }
 
-    async def execute(
+    async def execute(  # type: ignore[override]
         self,
         goal: str,
         context: str = "",

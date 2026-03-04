@@ -33,7 +33,7 @@ def _flush_pending_tty_input() -> None:
 
     try:
         import termios
-        termios.tcflush(fd, termios.TCIFLUSH)
+        termios.tcflush(fd, termios.TCIFLUSH)  # type: ignore[attr-defined]
         return
     except Exception:
         pass
@@ -67,7 +67,7 @@ def _init_prompt_session() -> None:
     # Save terminal state so we can restore it on exit
     try:
         import termios
-        _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
+        _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())  # type: ignore[attr-defined]
     except Exception:
         pass
 

@@ -232,11 +232,11 @@ class TestSessionManagerGetOrCreate:
         assert sa.key == "ch:a"
         assert sb.key == "ch:b"
 
-    def test_loads_persisted_session_from_disk(self, tmp_path: Path) -> None:
+    async def test_loads_persisted_session_from_disk(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
         session = mgr.get_or_create("persist:1")
         session.add_message("user", "saved message")
-        mgr.save(session)
+        await mgr.save(session)
 
         # New manager — empty cache, must read from disk
         mgr2 = make_manager(tmp_path)
@@ -251,19 +251,19 @@ class TestSessionManagerGetOrCreate:
 
 
 class TestSessionManagerSaveLoad:
-    def test_save_creates_jsonl_file(self, tmp_path: Path) -> None:
+    async def test_save_creates_jsonl_file(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
         session = make_session(key="sl:1", n=3)
-        mgr.save(session)
+        await mgr.save(session)
         files = list((tmp_path / "sessions").glob("*.jsonl"))
         assert len(files) == 1
 
-    def test_round_trip_preserves_messages(self, tmp_path: Path) -> None:
+    async def test_round_trip_preserves_messages(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
         session = make_session(key="sl:2", n=5)
         session.metadata["foo"] = "bar"
         session.last_consolidated = 2
-        mgr.save(session)
+        await mgr.save(session)
 
         mgr2 = make_manager(tmp_path)
         loaded = mgr2.get_or_create("sl:2")
@@ -273,13 +273,13 @@ class TestSessionManagerSaveLoad:
         assert loaded.metadata["foo"] == "bar"
         assert loaded.last_consolidated == 2
 
-    def test_round_trip_preserves_message_roles(self, tmp_path: Path) -> None:
+    async def test_round_trip_preserves_message_roles(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
         session = Session(key="sl:3")
         session.add_message("user", "q")
         session.add_message("assistant", "a")
         session.add_message("tool", "r", tool_call_id="x", name="fn")
-        mgr.save(session)
+        await mgr.save(session)
 
         mgr2 = make_manager(tmp_path)
         loaded = mgr2.get_or_create("sl:3")
@@ -288,23 +288,23 @@ class TestSessionManagerSaveLoad:
         assert loaded.messages[2]["role"] == "tool"
         assert loaded.messages[2]["tool_call_id"] == "x"
 
-    def test_round_trip_preserves_created_at(self, tmp_path: Path) -> None:
+    async def test_round_trip_preserves_created_at(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
         session = Session(key="sl:4")
         original_ts = session.created_at
-        mgr.save(session)
+        await mgr.save(session)
 
         mgr2 = make_manager(tmp_path)
         loaded = mgr2.get_or_create("sl:4")
         # Allow sub-second float precision
         assert abs((loaded.created_at - original_ts).total_seconds()) < 1
 
-    def test_save_overwrites_previous_file(self, tmp_path: Path) -> None:
+    async def test_save_overwrites_previous_file(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
         session = make_session(key="sl:5", n=2)
-        mgr.save(session)
+        await mgr.save(session)
         session.add_message("user", "extra")
-        mgr.save(session)
+        await mgr.save(session)
 
         mgr2 = make_manager(tmp_path)
         loaded = mgr2.get_or_create("sl:5")
@@ -325,10 +325,10 @@ class TestSessionManagerSaveLoad:
         result = mgr._load("corrupt:key")
         assert result is None
 
-    def test_save_updates_cache(self, tmp_path: Path) -> None:
+    async def test_save_updates_cache(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
         session = make_session(key="sl:6", n=1)
-        mgr.save(session)
+        await mgr.save(session)
         cached = mgr.get_or_create("sl:6")
         assert cached is session
 
@@ -343,39 +343,39 @@ class TestSessionManagerListSessions:
         mgr = make_manager(tmp_path)
         assert mgr.list_sessions() == []
 
-    def test_lists_all_saved_sessions(self, tmp_path: Path) -> None:
+    async def test_lists_all_saved_sessions(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
         for key in ("chan:1", "chan:2", "chan:3"):
-            mgr.save(make_session(key=key, n=1))
+            await mgr.save(make_session(key=key, n=1))
         sessions = mgr.list_sessions()
         assert len(sessions) == 3
 
-    def test_each_entry_has_required_fields(self, tmp_path: Path) -> None:
+    async def test_each_entry_has_required_fields(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
-        mgr.save(make_session(key="ls:check", n=1))
+        await mgr.save(make_session(key="ls:check", n=1))
         entry = mgr.list_sessions()[0]
         assert "key" in entry
         assert "created_at" in entry
         assert "updated_at" in entry
         assert "path" in entry
 
-    def test_sorted_most_recently_updated_first(self, tmp_path: Path) -> None:
+    async def test_sorted_most_recently_updated_first(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
         old_session = Session(key="ls:old")
         old_session.add_message("user", "old")
         old_session.updated_at = datetime.now() - timedelta(hours=2)
-        mgr.save(old_session)
+        await mgr.save(old_session)
 
         new_session = Session(key="ls:new")
         new_session.add_message("user", "new")
         new_session.updated_at = datetime.now()
-        mgr.save(new_session)
+        await mgr.save(new_session)
 
         listing = mgr.list_sessions()
         assert listing[0]["key"] == "ls:new"
         assert listing[1]["key"] == "ls:old"
 
-    def test_skips_files_without_metadata_header(self, tmp_path: Path) -> None:
+    async def test_skips_files_without_metadata_header(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -383,7 +383,7 @@ class TestSessionManagerListSessions:
         bad = sessions_dir / "bad_session.jsonl"
         bad.write_text(json.dumps({"role": "user", "content": "hi"}) + "\n", encoding="utf-8")
 
-        mgr.save(make_session(key="ls:good", n=1))
+        await mgr.save(make_session(key="ls:good", n=1))
         listing = mgr.list_sessions()
         # Only the good session should appear
         assert len(listing) == 1
@@ -512,10 +512,10 @@ class TestSessionManagerInvalidate:
         mgr = make_manager(tmp_path)
         mgr.invalidate("never:existed")  # must not raise
 
-    def test_after_invalidate_get_or_create_reloads_from_disk(self, tmp_path: Path) -> None:
+    async def test_after_invalidate_get_or_create_reloads_from_disk(self, tmp_path: Path) -> None:
         mgr = make_manager(tmp_path)
         session = make_session(key="inv:reload", n=2)
-        mgr.save(session)
+        await mgr.save(session)
         mgr.invalidate("inv:reload")
         reloaded = mgr.get_or_create("inv:reload")
         assert len(reloaded.messages) == 2

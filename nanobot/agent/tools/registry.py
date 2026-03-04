@@ -1,5 +1,6 @@
 """Tool registry for dynamic tool management."""
 
+from fnmatch import fnmatch
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
@@ -31,9 +32,23 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return name in self._tools
 
-    def get_definitions(self) -> list[dict[str, Any]]:
-        """Get all tool definitions in OpenAI format."""
-        return [tool.to_schema() for tool in self._tools.values()]
+    def get_definitions(
+        self,
+        allowed: list[str] | None = None,
+        denied: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get tool definitions in OpenAI format, optionally filtered.
+
+        Args:
+            allowed: fnmatch whitelist — if non-empty, only matching tools are included.
+            denied: fnmatch blacklist — matching tools are excluded.
+        """
+        filtered: list[Tool] = list(self._tools.values())
+        if allowed:
+            filtered = [t for t in filtered if any(fnmatch(t.name, p) for p in allowed)]
+        if denied:
+            filtered = [t for t in filtered if not any(fnmatch(t.name, p) for p in denied)]
+        return [t.to_schema() for t in filtered]
 
     async def execute(self, name: str, params: dict[str, Any]) -> str:
         """Execute a tool by name with given parameters."""

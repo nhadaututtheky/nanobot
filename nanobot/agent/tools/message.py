@@ -70,7 +70,7 @@ class MessageTool(Tool):
             "required": ["content"]
         }
 
-    async def execute(
+    async def execute(  # type: ignore[override]
         self,
         content: str,
         channel: str | None = None,

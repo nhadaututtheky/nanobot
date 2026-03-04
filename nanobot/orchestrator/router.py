@@ -233,14 +233,19 @@ class ModelRouter:
         ai_gw_base = ai_gw.proxy_url.rstrip("/") if ai_gw.proxy_url else ""
 
         local_proxy_providers: set[str] = set()
-        has_cli_proxy = False
+        # CLI Proxy only counts as available if we actually discovered models from it.
+        # Config match alone is not enough — the proxy may not be running.
+        has_cli_proxy = bool(self._proxy_model_names)
         for pname in self._active_providers:
             p = getattr(self._config.providers, pname, None)
             if not (p and p.api_base):
                 continue
             base = p.api_base.rstrip("/")
             if ai_gw_base and base == ai_gw_base:
-                has_cli_proxy = True  # CLI Proxy API — acts as universal gateway
+                # Provider points to CLI Proxy API — treat as local proxy
+                # (only available if proxy is running, checked via _proxy_model_names)
+                if not has_cli_proxy:
+                    local_proxy_providers.add(pname)
             elif any(kw in p.api_base for kw in ("localhost", "127.0.0.1", "0.0.0.0")):
                 local_proxy_providers.add(pname)
 

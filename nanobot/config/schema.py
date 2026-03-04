@@ -5,7 +5,7 @@ from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _T = TypeVar("_T", bound="Base")
 
@@ -90,6 +90,8 @@ class TelegramGroupConfig(Base):
     )  # Sender name/username prefixes to ignore
     ignore_patterns: list[str] = Field(default_factory=list)  # Regex patterns on content to ignore
     history_limit: int = 100
+    allowed_tools: list[str] = Field(default_factory=list)  # fnmatch whitelist (empty = all)
+    denied_tools: list[str] = Field(default_factory=list)  # fnmatch blacklist
 
 
 class TelegramActionsConfig(Base):
@@ -112,6 +114,7 @@ class RoleConfig(Base):
     builtin: bool = False  # True for default 4 (UI blocks deletion)
     temperature: float = 0.0  # 0 = inherit defaults
     max_tokens: int = 0  # 0 = inherit defaults
+    granted_skills: list[str] = Field(default_factory=list)  # empty = all skills accessible
 
 
 class SubAgentRoleConfig(RoleConfig):
@@ -506,6 +509,34 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
+class DefaultCronJob(Base):
+    """A default cron job that is ensured on startup."""
+
+    name: str = ""
+    expr: str = ""  # cron expression e.g. "0 7 * * *"
+    tz: str = "Asia/Ho_Chi_Minh"
+    message: str = ""
+    deliver: bool = True
+    channel: str = "telegram"
+    to: str = ""  # chat_id to deliver to
+
+
+class CronConfig(Base):
+    """Cron service configuration."""
+
+    default_jobs: list[DefaultCronJob] = Field(default_factory=list)
+
+
+class ContextCompactionConfig(Base):
+    """Mid-loop context compaction configuration."""
+
+    enabled: bool = True
+    threshold: float = 0.75  # Trigger at 75% context window usage
+    summary_model: str = ""  # Empty = use cheapest available model
+    keep_recent_turns: int = 6  # Never compact last N user-assistant pairs
+    min_messages_to_compact: int = 10
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -555,18 +586,37 @@ class OrchestratorConfig(Base):
     max_tasks_per_graph: int = 20
     models: list[ModelCapabilityConfig] = Field(default_factory=list)
 
+    # Evaluate loop (generator-evaluator feedback)
+    evaluate_by_default: bool = False  # If True, all nodes get eval loop
+    eval_max_rounds: int = 3
+    eval_model: str = ""  # Empty = auto-select
+    eval_threshold: float = 0.7  # Min score to pass
+
     # Telegram integration (multi-bot orchestrator)
     telegram_group_id: str = ""  # Chat ID where sub-agents post progress
     telegram_result_channel: str = ""  # Channel/chat ID for final summary
     telegram_progress_throttle_s: float = 20.0  # Min seconds between progress posts per node
 
 
+class QualityGateConfig(Base):
+    """A single quality gate: shell command or LLM reviewer validation."""
+
+    name: str = ""
+    gate_type: Literal["shell", "reviewer"] = "reviewer"
+    command: str = ""  # shell: "ruff check {file}" | reviewer: prompt template with {output}
+    on_events: list[str] = Field(default_factory=list)  # e.g. ["agent.response", "node.completed"]
+    blocking: bool = True  # if False, failure is logged but does not block
+    timeout_s: int = 30
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    compaction: ContextCompactionConfig = Field(default_factory=ContextCompactionConfig)
     subagent: SubAgentConfig = Field(default_factory=SubAgentConfig)
     orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)
+    quality_gates: list[QualityGateConfig] = Field(default_factory=list)
 
 
 class ProviderConfig(Base):
@@ -683,6 +733,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    cron: CronConfig = Field(default_factory=CronConfig)
 
     @property
     def workspace_path(self) -> Path:
@@ -770,4 +821,4 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = SettingsConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")

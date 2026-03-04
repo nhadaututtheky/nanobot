@@ -66,7 +66,7 @@ class WebSearchTool(Tool):
         """Resolve API key at call time so env/config changes are picked up."""
         return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
 
-    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:  # type: ignore[override]
         if not self.api_key:
             return (
                 "Error: Brave Search API key not configured. "
@@ -117,7 +117,7 @@ class WebFetchTool(Tool):
     def __init__(self, max_chars: int = 50000):
         self.max_chars = max_chars
 
-    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:  # noqa: N803
+    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:  # type: ignore[override]  # noqa: N803
         from readability import Document
 
         max_chars = maxChars or self.max_chars

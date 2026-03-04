@@ -33,7 +33,7 @@ class DiscordChannel(BaseChannel):
     def __init__(self, config: DiscordConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: DiscordConfig = config
-        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._ws: Any = None
         self._seq: int | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
@@ -111,6 +111,7 @@ class DiscordChannel(BaseChannel):
         """Send a single Discord API payload with retry on rate-limit. Returns True on success."""
         for attempt in range(3):
             try:
+                assert self._http is not None
                 response = await self._http.post(url, headers=headers, json=payload)
                 if response.status_code == 429:
                     data = response.json()
@@ -267,6 +268,7 @@ class DiscordChannel(BaseChannel):
             headers = {"Authorization": f"Bot {self.config.token}"}
             while self._running:
                 try:
+                    assert self._http is not None
                     await self._http.post(url, headers=headers)
                 except asyncio.CancelledError:
                     return

@@ -14,8 +14,8 @@ EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 class EventBus:
     """Simple async event bus — subscribe to named events, emit payloads.
 
-    All handlers run concurrently via ``asyncio.gather``.  Exceptions in
-    individual handlers are logged but never propagate to the emitter.
+    Handlers are dispatched as fire-and-forget tasks so a slow handler
+    never blocks other subscribers or the emitter.
     """
 
     def __init__(self) -> None:
@@ -35,15 +35,22 @@ class EventBus:
                 pass
 
     async def emit(self, event: str, payload: dict[str, Any]) -> None:
-        """Fire *event* with *payload* to all subscribers (concurrent)."""
+        """Fire *event* with *payload* to all subscribers (fire-and-forget)."""
         handlers = list(self._handlers.get(event, []))
         if not handlers:
             return
 
-        results = await asyncio.gather(
-            *(h(event, payload) for h in handlers),
-            return_exceptions=True,
-        )
-        for r in results:
-            if isinstance(r, BaseException):
-                logger.warning("EventBus handler error on '{}': {}", event, r)
+        for h in handlers:
+            try:
+                asyncio.create_task(self._safe_call(h, event, payload))
+            except RuntimeError:
+                pass  # No running event loop
+
+    async def _safe_call(
+        self, handler: EventCallback, event: str, payload: dict[str, Any]
+    ) -> None:
+        """Run a single handler with isolated exception handling."""
+        try:
+            await handler(event, payload)
+        except Exception as e:
+            logger.warning("EventBus handler error on '{}': {}", event, e)

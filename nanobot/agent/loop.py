@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections import OrderedDict
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -26,10 +27,15 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.scrubber import scrub_credentials
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, Config, ExecToolConfig
     from nanobot.cron.service import CronService
+    from nanobot.orchestrator.decomposer import GoalDecomposer
+    from nanobot.orchestrator.executor import GraphExecutor
+    from nanobot.orchestrator.router import ModelRouter
+    from nanobot.orchestrator.store import GraphStore
 
 
 class AgentLoop:
@@ -99,11 +105,46 @@ class AgentLoop:
             subagent_config=config.agents.subagent if config else None,
         )
 
+        # Context compaction (auto-summarise when nearing context limit)
+        self._compactor = None
+        if config and config.agents.compaction.enabled:
+            from nanobot.agent.compaction import ContextCompactor
+
+            cc = config.agents.compaction
+            self._compactor = ContextCompactor(
+                provider=provider,
+                model=cc.summary_model,
+                threshold=cc.threshold,
+                keep_recent_turns=cc.keep_recent_turns,
+                min_messages_to_compact=cc.min_messages_to_compact,
+            )
+
+        # Agent handoff
+        self._handoff_manager = None
+        if config:
+            from nanobot.agent.handoff import HandoffManager
+            from nanobot.agent.tools.handoff import HandoffTool
+
+            self._handoff_manager = HandoffManager(
+                provider=provider, config=config, context_builder=self.context,
+            )
+            self.tools.register(HandoffTool(self._handoff_manager))
+
+        # Quality gates (configured via agents.quality_gates in config)
+        self._gate_runner = None
+        if config and config.agents.quality_gates:
+            from nanobot.agent.quality_gates import QualityGateRunner
+
+            self._gate_runner = QualityGateRunner(
+                gates=config.agents.quality_gates,
+                provider=provider,
+            )
+
         # Orchestrator components (None until _init_orchestrator is called)
-        self.orchestrator_store = None
-        self.orchestrator_executor = None
-        self.orchestrator_decomposer = None
-        self.orchestrator_router = None
+        self.orchestrator_store: GraphStore | None = None
+        self.orchestrator_executor: GraphExecutor | None = None
+        self.orchestrator_decomposer: GoalDecomposer | None = None
+        self.orchestrator_router: ModelRouter | None = None
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -111,11 +152,12 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self.on_mcp_ready: Any = None  # Callback: async fn(ToolRegistry)
+        self._tool_restrictions: dict[str, list[str]] = {}  # {"allowed": [...], "denied": [...]}
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
-        self._consolidation_locks: dict[str, asyncio.Lock] = {}
+        self._consolidation_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
         self._active_tasks: dict[str, set[asyncio.Task]] = {}  # session_key -> tasks
-        self._session_locks: dict[str, asyncio.Lock] = {}  # Per-session processing locks
+        self._session_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()  # LRU-capped
         self._register_default_tools()
         self._init_orchestrator()
 
@@ -155,6 +197,7 @@ class AgentLoop:
             return self.provider
 
         # Build a new LiteLLM provider from config
+        assert self._config is not None
         model = self._config.agents.defaults.model
         p = self._config.get_provider(model)
         provider_name = self._config.get_provider_name(model)
@@ -187,35 +230,40 @@ class AgentLoop:
 
         try:
             orch_provider = self._make_orchestrator_provider()
-            self.orchestrator_router = ModelRouter(self._config)
-            self.orchestrator_store = GraphStore(self.workspace)
-            self.orchestrator_decomposer = GoalDecomposer(
+            router = ModelRouter(self._config)
+            store = GraphStore(self.workspace)
+            decomposer = GoalDecomposer(
                 provider=orch_provider,
-                router=self.orchestrator_router,
+                router=router,
             )
 
             # Telegram multi-bot sender (only active if telegram_group_id is set)
             tg_sender = TelegramOrchestratorSender(self._config)
 
-            self.orchestrator_executor = GraphExecutor(
+            executor = GraphExecutor(
                 provider=orch_provider,
                 workspace=self.workspace,
                 bus=self.bus,
-                store=self.orchestrator_store,
+                store=store,
                 config=self._config,
                 telegram_sender=tg_sender if tg_sender.enabled else None,
             )
 
+            self.orchestrator_router = router
+            self.orchestrator_store = store
+            self.orchestrator_decomposer = decomposer
+            self.orchestrator_executor = executor
+
             self.tools.register(
                 OrchestrateTool(
-                    decomposer=self.orchestrator_decomposer,
-                    executor=self.orchestrator_executor,
-                    store=self.orchestrator_store,
+                    decomposer=decomposer,
+                    executor=executor,
+                    store=store,
                 )
             )
             logger.info(
                 "Orchestrator initialised ({} models available)",
-                len(self.orchestrator_router.get_models_info()),
+                len(router.get_models_info()),
             )
         except Exception as e:
             logger.warning("Orchestrator init failed (continuing without): {}", e)
@@ -335,7 +383,10 @@ class AgentLoop:
 
             response = await self.provider.chat(
                 messages=messages,
-                tools=self.tools.get_definitions(),
+                tools=self.tools.get_definitions(
+                    allowed=self._tool_restrictions.get("allowed") or None,
+                    denied=self._tool_restrictions.get("denied") or None,
+                ),
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
@@ -382,6 +433,10 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+
+                # Mid-loop context compaction check
+                if self._compactor and self._compactor.should_compact(messages, self.model):
+                    messages = await self._compactor.compact(messages, self.model)
             else:
                 # Error responses (timeout, CLI crash) — log and surface to user
                 if response.finish_reason == "error":
@@ -435,7 +490,7 @@ class AgentLoop:
 
             # Observe-only messages: save to session history for context, skip agent
             if msg.metadata.get("_observe_only"):
-                self._observe(msg)
+                await self._observe(msg)
                 continue
 
             if msg.content.strip().lower() == "/stop":
@@ -473,12 +528,28 @@ class AgentLoop:
             )
         )
 
+    _LOCK_LRU_CAP = 200
+
     def _get_session_lock(self, session_key: str) -> asyncio.Lock:
-        """Get or create a per-session processing lock."""
-        lock = self._session_locks.get(session_key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._session_locks[session_key] = lock
+        """Get or create a per-session processing lock (LRU-capped)."""
+        if session_key in self._session_locks:
+            self._session_locks.move_to_end(session_key)
+            return self._session_locks[session_key]
+        lock = asyncio.Lock()
+        self._session_locks[session_key] = lock
+        if len(self._session_locks) > self._LOCK_LRU_CAP:
+            self._session_locks.popitem(last=False)
+        return lock
+
+    def _get_consolidation_lock(self, session_key: str) -> asyncio.Lock:
+        """Get or create a per-session consolidation lock (LRU-capped)."""
+        if session_key in self._consolidation_locks:
+            self._consolidation_locks.move_to_end(session_key)
+            return self._consolidation_locks[session_key]
+        lock = asyncio.Lock()
+        self._consolidation_locks[session_key] = lock
+        if len(self._consolidation_locks) > self._LOCK_LRU_CAP:
+            self._consolidation_locks.popitem(last=False)
         return lock
 
     async def _dispatch(self, msg: InboundMessage) -> None:
@@ -533,7 +604,7 @@ class AgentLoop:
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
 
-    def _observe(self, msg: InboundMessage) -> None:
+    async def _observe(self, msg: InboundMessage) -> None:
         """Save an observed message to session history without agent processing.
 
         This gives the bot conversational context for group chats where it
@@ -545,7 +616,7 @@ class AgentLoop:
         """
         session = self.sessions.get_or_create(msg.session_key)
         session.add_message("context", msg.content)
-        self.sessions.save(session)
+        await self.sessions.save(session)
         logger.debug("Observed message in {}: {}...", msg.session_key, msg.content[:60])
 
     def stop(self) -> None:
@@ -580,7 +651,7 @@ class AgentLoop:
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
-            self.sessions.save(session)
+            await self.sessions.save(session)
             return OutboundMessage(
                 channel=channel,
                 chat_id=chat_id,
@@ -596,7 +667,7 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
+            lock = self._get_consolidation_lock(session.key)
             self._consolidating.add(session.key)
             try:
                 async with lock:
@@ -619,11 +690,9 @@ class AgentLoop:
                 )
             finally:
                 self._consolidating.discard(session.key)
-                if not lock.locked():
-                    self._consolidation_locks.pop(session.key, None)
 
             session.clear()
-            self.sessions.save(session)
+            await self.sessions.save(session)
             self.sessions.invalidate(session.key)
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="New session started."
@@ -638,27 +707,26 @@ class AgentLoop:
         unconsolidated = len(session.messages) - session.last_consolidated
         if unconsolidated >= self.memory_window and session.key not in self._consolidating:
             self._consolidating.add(session.key)
-            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
+            lock = self._get_consolidation_lock(session.key)
 
-            async def _consolidate_and_unlock():
+            async def _consolidate_and_unlock() -> None:
                 try:
                     async with lock:
                         await self._consolidate_memory(session)
                 finally:
                     self._consolidating.discard(session.key)
-                    if not lock.locked():
-                        self._consolidation_locks.pop(session.key, None)
-                    _task = asyncio.current_task()
-                    if _task is not None:
-                        self._consolidation_tasks.discard(_task)
 
             _task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.add(_task)
+            _task.add_done_callback(self._consolidation_tasks.discard)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
+
+        # Per-group tool restrictions (from Telegram group config, etc.)
+        self._tool_restrictions = msg.metadata.get("tool_restrictions", {}) if msg.metadata else {}
 
         # Per-channel history limit override (e.g. Telegram per-group config)
         effective_history_limit = (
@@ -702,6 +770,17 @@ class AgentLoop:
             on_progress=on_progress or _bus_progress,
         )
 
+        # Quality gate check on agent response
+        if final_content and self._gate_runner and self._gate_runner.has_gates_for("agent.response"):
+            gate_results = await self._gate_runner.check(
+                "agent.response", {"output": final_content}
+            )
+            failed = [r for r in gate_results if not r.passed]
+            if failed:
+                names = ", ".join(r.gate_name or "unnamed" for r in failed)
+                reasons = "; ".join(r.message for r in failed if r.message)
+                logger.warning("Quality gate(s) failed: {} — {}", names, reasons)
+
         # If message tool already sent a response, don't send a duplicate or error
         message_already_sent = (
             (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn
@@ -715,11 +794,12 @@ class AgentLoop:
             )
 
         self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
+        await self.sessions.save(session)
 
         if message_already_sent:
             return None
 
+        assert final_content is not None
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
         return OutboundMessage(
@@ -736,12 +816,11 @@ class AgentLoop:
         for m in messages[skip:]:
             entry = {k: v for k, v in m.items() if k != "reasoning_content"}
             role, content = entry.get("role"), entry.get("content")
-            if (
-                role == "tool"
-                and isinstance(content, str)
-                and len(content) > self._TOOL_RESULT_MAX_CHARS
-            ):
-                entry["content"] = content[: self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+            if role == "tool" and isinstance(content, str):
+                content = scrub_credentials(content)
+                if len(content) > self._TOOL_RESULT_MAX_CHARS:
+                    content = content[: self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                entry["content"] = content
             elif role == "user":
                 if isinstance(content, str) and content.startswith(
                     ContextBuilder._RUNTIME_CONTEXT_TAG

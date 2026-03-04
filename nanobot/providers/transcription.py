@@ -51,7 +51,7 @@ class GroqTranscriptionProvider:
                     response = await client.post(
                         self.api_url,
                         headers=headers,
-                        files=files,
+                        files=files,  # type: ignore[arg-type]
                         timeout=60.0
                     )
 

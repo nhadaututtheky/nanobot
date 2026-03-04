@@ -6,17 +6,21 @@ echo  NanoBot Launcher
 echo  ================
 echo.
 
-echo [1] Starting NanoBot with PM2...
-call pm2 start nanobot 2>nul || call pm2 start "python -m nanobot" --name nanobot --cwd "D:\Project\NanoBot" --interpreter none 2>nul
+echo [1] Cleaning up old PM2 process...
+call pm2 delete nanobot 2>nul
 echo.
 
-echo [2] Starting Dashboard on port 5174...
+echo [2] Starting NanoBot Gateway with PM2...
+call pm2 start ecosystem.config.js
+echo.
+
+echo [3] Starting Dashboard on port 5174...
 cd /d D:\Project\NanoBot\dashboard
 start "Dashboard" /min cmd /c "npm run dev 2>&1"
 cd /d D:\Project\NanoBot
 echo.
 
-echo [3] Waiting 4 seconds...
+echo [4] Waiting 4 seconds...
 timeout /t 4 /nobreak >nul
 echo.
 

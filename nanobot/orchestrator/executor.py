@@ -21,6 +21,12 @@ from nanobot.orchestrator.models import (
 
 _ARTIFACTS_RE = re.compile(r"<artifacts>\s*(.*?)\s*</artifacts>", re.DOTALL)
 _MAX_OUTPUT_FILES = 20
+_LLM_ERROR_PREFIXES = (
+    "Error calling LLM",
+    "There's an issue with the selected model",
+    "InternalServerError",
+)
+_MAX_LLM_RETRIES = 2  # retries on transient LLM errors per iteration
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
@@ -156,10 +162,11 @@ class GraphExecutor:
                     node.status = TaskStatus.QUEUED
                 await self._save(graph)
 
-                # Wait for this wave to complete
+                # Wait for ANY task to finish so we can immediately start
+                # downstream dependents instead of blocking on slow siblings.
                 _done, inflight = await asyncio.wait(
                     inflight,
-                    return_when=asyncio.ALL_COMPLETED,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
 
         except asyncio.CancelledError:
@@ -217,8 +224,42 @@ class GraphExecutor:
 
                 # Extract artifact file declarations from result
                 clean_result, artifact_paths = _extract_artifacts(result or "")
-                node.result = clean_result or result or ""
-                node.output_summary = (clean_result or "")[:500]
+                final_result = clean_result or result or ""
+
+                # Evaluate loop (if enabled for this node or globally)
+                should_eval = node.evaluate or (
+                    self._config.agents.orchestrator.evaluate_by_default
+                )
+                if should_eval and final_result:
+                    from nanobot.orchestrator.evaluator import TaskEvaluator
+
+                    evaluator = TaskEvaluator(
+                        provider=self._provider,
+                        model=self._config.agents.orchestrator.eval_model,
+                        threshold=self._config.agents.orchestrator.eval_threshold,
+                        max_rounds=self._config.agents.orchestrator.eval_max_rounds,
+                    )
+
+                    async def _regenerate(feedback: str) -> str:
+                        regen_messages: list[dict[str, Any]] = [
+                            {"role": "system", "content": self._build_node_system_prompt(node)},
+                            {"role": "user", "content": (
+                                f"{self._build_node_prompt(node)}\n\n"
+                                f"## Previous attempt feedback\n{feedback}\n\n"
+                                "Please improve your output based on the feedback above."
+                            )},
+                        ]
+                        return await self._agent_loop(
+                            regen_messages, tools, model, node, graph,
+                        ) or ""
+
+                    final_result, eval_result = await evaluator.evaluate_loop(
+                        node, _regenerate, final_result,
+                    )
+                    node.eval_score = eval_result.score
+
+                node.result = final_result
+                node.output_summary = final_result[:500]
                 node.output_files = artifact_paths
                 node.status = TaskStatus.COMPLETED
                 node.progress = 1.0
@@ -280,6 +321,7 @@ class GraphExecutor:
 
         iteration = 0
         final_result: str | None = None
+        consecutive_errors = 0
 
         while iteration < max_iterations:
             iteration += 1
@@ -291,6 +333,34 @@ class GraphExecutor:
                 temperature=effective_temp,
                 max_tokens=effective_max_tokens,
             )
+
+            # --- Handle LLM errors (finish_reason="error" or error prefix) ---
+            is_error = response.finish_reason == "error"
+            if not is_error and response.content:
+                is_error = any(
+                    response.content.startswith(ep) for ep in _LLM_ERROR_PREFIXES
+                )
+
+            if is_error:
+                error_detail = (response.content or "unknown LLM error")[:300]
+                consecutive_errors += 1
+                logger.warning(
+                    "Node {} LLM error (attempt {}/{}): {}",
+                    node.id,
+                    consecutive_errors,
+                    _MAX_LLM_RETRIES,
+                    error_detail,
+                )
+                if consecutive_errors >= _MAX_LLM_RETRIES:
+                    raise RuntimeError(
+                        f"LLM failed after {_MAX_LLM_RETRIES} attempts: {error_detail}"
+                    )
+                # Brief backoff before retry
+                await asyncio.sleep(2 * consecutive_errors)
+                continue
+
+            # Reset error counter on successful response
+            consecutive_errors = 0
 
             if response.has_tool_calls:
                 tool_call_dicts = [
@@ -350,13 +420,13 @@ class GraphExecutor:
 
     def _build_node_tools(self, role: str) -> Any:
         """Build tool registry for a node, filtered by worker role."""
-        from nanobot.agent.subagent import ROLE_TOOLS
         from nanobot.agent.tools.filesystem import (
             EditFileTool,
             ListDirTool,
             ReadFileTool,
             WriteFileTool,
         )
+        from nanobot.agent.tools.profiles import get_allowed_tools
         from nanobot.agent.tools.registry import ToolRegistry
         from nanobot.agent.tools.shell import ExecTool
         from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
@@ -381,10 +451,11 @@ class GraphExecutor:
 
         effective_roles = self._config.agents.subagent.get_effective_roles()
         eff_role = effective_roles.get(role)
-        if eff_role and eff_role.tools:
-            allowed = set(eff_role.tools)
-        else:
-            allowed = ROLE_TOOLS.get(role, set())
+        allowed = get_allowed_tools(
+            profile=getattr(eff_role, "tool_profile", None) if eff_role else None,
+            role=role,
+            explicit_tools=eff_role.tools if eff_role and eff_role.tools else None,
+        )
 
         for tool in all_tools:
             if not allowed or tool.name in allowed:

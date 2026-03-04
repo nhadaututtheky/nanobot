@@ -1,12 +1,17 @@
 """Subagent manager for background task execution."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import uuid
 from collections import deque
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import ExecToolConfig, SubAgentConfig
 
 from loguru import logger
 
@@ -37,10 +42,10 @@ class SubagentManager:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         brave_api_key: str | None = None,
-        exec_config: "ExecToolConfig | None" = None,  # noqa: F821
+        exec_config: ExecToolConfig | None = None,
         restrict_to_workspace: bool = False,
         mcp_servers: dict | None = None,
-        subagent_config: "SubAgentConfig | None" = None,  # noqa: F821
+        subagent_config: SubAgentConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, SubAgentConfig
         self.provider = provider

@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ConfigFormView } from './ConfigFormView'
 import { ConfigRawView } from './ConfigRawView'
+import { TeamBotsSetup } from './TeamBotsSetup'
 
 type ConfigValue = string | number | boolean | Record<string, unknown> | unknown[]
 
@@ -18,7 +19,7 @@ export function ConfigPage() {
   const [rawJson, setRawJson] = useState<string | null>(null)
   const [formConfig, setFormConfig] = useState<Record<string, ConfigValue> | null>(null)
   const [jsonParseError, setJsonParseError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'form' | 'raw'>('form')
+  const [activeTab, setActiveTab] = useState<'form' | 'team' | 'raw'>('form')
 
   // ---------------------------------------------------------------------------
   // Data fetching
@@ -88,7 +89,7 @@ export function ConfigPage() {
   // ---------------------------------------------------------------------------
 
   function handleTabChange(tab: string) {
-    const t = tab as 'form' | 'raw'
+    const t = tab as 'form' | 'team' | 'raw'
     if (t === 'raw' && formConfig) {
       setRawJson(JSON.stringify(formConfig, null, 2))
     }
@@ -165,6 +166,7 @@ export function ConfigPage() {
       <Tabs value={activeTab} onValueChange={handleTabChange}>
         <TabsList className="mb-4">
           <TabsTrigger value="form">Form</TabsTrigger>
+          <TabsTrigger value="team">Team Bots</TabsTrigger>
           <TabsTrigger value="raw">Raw JSON</TabsTrigger>
         </TabsList>
 
@@ -181,6 +183,10 @@ export function ConfigPage() {
               onChange={(patch) => setFormConfig(patch)}
             />
           )}
+        </TabsContent>
+
+        <TabsContent value="team">
+          <TeamBotsSetup />
         </TabsContent>
 
         <TabsContent value="raw">

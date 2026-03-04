@@ -105,6 +105,7 @@ class TelegramTeamBot:
             self.role, self.bot_username, self.is_coordinator,
         )
 
+        assert self._app.updater is not None
         await self._app.updater.start_polling(
             allowed_updates=["message"],
             drop_pending_updates=True,
@@ -232,13 +233,36 @@ class TelegramTeamManager:
         target_roles = self._group_config.roles or list(effective_roles.keys())
         coordinator = self._group_config.coordinator_role
 
+        # Fallback: check agents.subagent.roles for bot tokens
+        subagent_roles = self._config.agents.subagent.get_effective_roles()
+
         for role_name in target_roles:
             role_cfg = effective_roles.get(role_name)
+            sub_role = subagent_roles.get(role_name)
+
+            # Build TeamRoleConfig from subagent role if not in team_roles
+            if not role_cfg and sub_role:
+                from nanobot.config.schema import TeamRoleConfig
+                role_cfg = TeamRoleConfig(
+                    model=sub_role.model,
+                    display_name=sub_role.display_name,
+                    description=sub_role.description,
+                    persona=sub_role.persona,
+                    icon=sub_role.icon,
+                    strengths=list(sub_role.strengths),
+                    telegram_bot_token=sub_role.telegram_bot_token,
+                )
             if not role_cfg:
                 logger.warning("Team: role '{}' not found in config, skipping", role_name)
                 continue
 
             token = role_cfg.telegram_bot_token
+            # Fall back to subagent role token if team_roles doesn't have one
+            if not token and sub_role and sub_role.telegram_bot_token:
+                token = sub_role.telegram_bot_token
+                logger.debug(
+                    "Team: role '{}' using token from subagent config", role_name,
+                )
             if not token:
                 logger.warning("Team: role '{}' has no telegram_bot_token, skipping", role_name)
                 continue

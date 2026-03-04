@@ -154,7 +154,7 @@ class TeamRoleAgent:
         session = self._sessions.get_or_create(self._session_key(msg.chat_id))
         sender = msg.source_role or msg.sender_name
         session.add_message("context", f"[{sender}]: {msg.content}")
-        self._sessions.save(session)
+        await self._sessions.save(session)
 
     async def respond(self, msg: TeamMessage) -> str | None:
         """Generate a response using the role's persona, with tool support.
@@ -177,7 +177,7 @@ class TeamRoleAgent:
             {"role": "user", "content": msg.content},
         ]
 
-        model = self._role_config.model or self._provider.default_model
+        model = self._role_config.model or self._provider.get_default_model()
         temperature = self._role_config.temperature or 0.3
         max_tokens = self._role_config.max_tokens or 4096
 
@@ -234,7 +234,7 @@ class TeamRoleAgent:
                     if content:
                         session.add_message("user", msg.content)
                         session.add_message("assistant", content)
-                        self._sessions.save(session)
+                        await self._sessions.save(session)
                     return content or None
 
                 # Process tool calls
@@ -245,9 +245,9 @@ class TeamRoleAgent:
                 })
 
                 for tc in llm_response.tool_calls:
-                    tool_name = tc.get("function", {}).get("name", "")
-                    tool_args = tc.get("function", {}).get("arguments", {})
-                    tool_id = tc.get("id", "")
+                    tool_name = tc.name
+                    tool_args = tc.arguments
+                    tool_id = tc.id
 
                     # Parse args if string
                     if isinstance(tool_args, str):
@@ -286,7 +286,7 @@ class TeamRoleAgent:
             if content:
                 session.add_message("user", msg.content)
                 session.add_message("assistant", content)
-                self._sessions.save(session)
+                await self._sessions.save(session)
             return content or None
 
         except Exception as e:

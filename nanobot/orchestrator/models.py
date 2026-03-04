@@ -74,6 +74,8 @@ class TaskNode:
     output_summary: str = ""  # Extracted after completion
     output_files: list[str] = field(default_factory=list)  # Relative paths produced by this node
     input_files: list[str] = field(default_factory=list)  # Injected from upstream dependencies
+    evaluate: bool = False  # Run eval loop on this node's output
+    eval_score: float = 0.0  # Last eval score (0.0-1.0)
     error: str = ""
     started_at: str = ""
     completed_at: str = ""
@@ -93,6 +95,8 @@ class TaskNode:
             "outputSummary": self.output_summary,
             "outputFiles": self.output_files,
             "inputFiles": self.input_files,
+            "evaluate": self.evaluate,
+            "evalScore": self.eval_score,
             "error": self.error,
             "startedAt": self.started_at,
             "completedAt": self.completed_at,
@@ -114,6 +118,8 @@ class TaskNode:
             output_summary=d.get("outputSummary", d.get("output_summary", "")),
             output_files=d.get("outputFiles", d.get("output_files", [])),
             input_files=d.get("inputFiles", d.get("input_files", [])),
+            evaluate=d.get("evaluate", False),
+            eval_score=d.get("evalScore", d.get("eval_score", 0.0)),
             error=d.get("error", ""),
             started_at=d.get("startedAt", d.get("started_at", "")),
             completed_at=d.get("completedAt", d.get("completed_at", "")),
@@ -153,31 +159,54 @@ class TaskGraph:
     started_at: str = ""
     completed_at: str = ""
 
+    # --- index cache (rebuilt lazily) ---
+
+    def _build_index(self) -> None:
+        """Build O(1) lookup maps from nodes/edges."""
+        self._node_map: dict[str, TaskNode] = {n.id: n for n in self.nodes}
+        self._dep_map: dict[str, list[str]] = {n.id: [] for n in self.nodes}
+        self._fwd_map: dict[str, list[str]] = {n.id: [] for n in self.nodes}
+        for e in self.edges:
+            if e.to_id in self._dep_map:
+                self._dep_map[e.to_id].append(e.from_id)
+            if e.from_id in self._fwd_map:
+                self._fwd_map[e.from_id].append(e.to_id)
+
+    def _ensure_index(self) -> None:
+        if not hasattr(self, "_node_map") or len(self._node_map) != len(self.nodes):
+            self._build_index()
+
+    def rebuild_index(self) -> None:
+        """Force rebuild after structural changes (add/remove nodes/edges)."""
+        self._build_index()
+
     # --- query helpers ---
 
     def get_node(self, node_id: str) -> TaskNode | None:
-        for n in self.nodes:
-            if n.id == node_id:
-                return n
-        return None
+        self._ensure_index()
+        return self._node_map.get(node_id)
 
     def get_dependencies(self, node_id: str) -> list[str]:
         """Return IDs of nodes that must complete before node_id."""
-        return [e.from_id for e in self.edges if e.to_id == node_id]
+        self._ensure_index()
+        return self._dep_map.get(node_id, [])
 
     def get_dependents(self, node_id: str) -> list[str]:
         """Return IDs of nodes that depend on node_id."""
-        return [e.to_id for e in self.edges if e.from_id == node_id]
+        self._ensure_index()
+        return self._fwd_map.get(node_id, [])
 
     def get_ready_tasks(self) -> list[TaskNode]:
         """Return nodes whose dependencies are all completed and that are pending."""
+        self._ensure_index()
         ready: list[TaskNode] = []
         for node in self.nodes:
             if node.status != TaskStatus.PENDING:
                 continue
-            deps = self.get_dependencies(node.id)
+            deps = self._dep_map.get(node.id, [])
             if all(
-                (dep := self.get_node(d)) is not None and dep.status == TaskStatus.COMPLETED
+                (dep := self._node_map.get(d)) is not None
+                and dep.status == TaskStatus.COMPLETED
                 for d in deps
             ):
                 ready.append(node)

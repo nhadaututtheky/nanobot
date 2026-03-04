@@ -65,12 +65,12 @@ class TestSessionLastConsolidated:
         session = Session(key="test:initial")
         assert session.last_consolidated == 0
 
-    def test_last_consolidated_persistence(self, tmp_path) -> None:
+    async def test_last_consolidated_persistence(self, tmp_path) -> None:
         """Test that last_consolidated persists across save/load."""
         manager = SessionManager(Path(tmp_path))
         session1 = create_session_with_messages("test:persist", 20)
         session1.last_consolidated = 15
-        manager.save(session1)
+        await manager.save(session1)
 
         session2 = manager.get_or_create("test:persist")
         assert session2.last_consolidated == 15
@@ -149,20 +149,20 @@ class TestSessionPersistence:
     def temp_manager(self, tmp_path):
         return SessionManager(Path(tmp_path))
 
-    def test_persistence_roundtrip(self, temp_manager):
+    async def test_persistence_roundtrip(self, temp_manager):
         """Test that messages persist across save/load."""
         session1 = create_session_with_messages("test:persistence", 20)
-        temp_manager.save(session1)
+        await temp_manager.save(session1)
 
         session2 = temp_manager.get_or_create("test:persistence")
         assert len(session2.messages) == 20
         assert session2.messages[0]["content"] == "msg0"
         assert session2.messages[-1]["content"] == "msg19"
 
-    def test_get_history_after_reload(self, temp_manager):
+    async def test_get_history_after_reload(self, temp_manager):
         """Test that get_history works correctly after reload."""
         session1 = create_session_with_messages("test:reload", 30)
-        temp_manager.save(session1)
+        await temp_manager.save(session1)
 
         session2 = temp_manager.get_or_create("test:reload")
         history = session2.get_history(max_messages=10)
@@ -506,7 +506,7 @@ class TestConsolidationDeduplicationGuard:
         for i in range(15):
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
-        loop.sessions.save(session)
+        await loop.sessions.save(session)
 
         consolidation_calls = 0
 
@@ -550,7 +550,7 @@ class TestConsolidationDeduplicationGuard:
         for i in range(15):
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
-        loop.sessions.save(session)
+        await loop.sessions.save(session)
 
         consolidation_calls = 0
         active = 0
@@ -602,7 +602,7 @@ class TestConsolidationDeduplicationGuard:
         for i in range(15):
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
-        loop.sessions.save(session)
+        await loop.sessions.save(session)
 
         started = asyncio.Event()
 
@@ -647,7 +647,7 @@ class TestConsolidationDeduplicationGuard:
         for i in range(15):
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
-        loop.sessions.save(session)
+        await loop.sessions.save(session)
 
         started = asyncio.Event()
         release = asyncio.Event()
@@ -705,7 +705,7 @@ class TestConsolidationDeduplicationGuard:
         for i in range(5):
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
-        loop.sessions.save(session)
+        await loop.sessions.save(session)
         before_count = len(session.messages)
 
         async def _failing_consolidate(sess, archive_all: bool = False) -> bool:
@@ -749,7 +749,7 @@ class TestConsolidationDeduplicationGuard:
         for i in range(15):
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
-        loop.sessions.save(session)
+        await loop.sessions.save(session)
 
         started = asyncio.Event()
         release = asyncio.Event()
@@ -810,7 +810,7 @@ class TestConsolidationDeduplicationGuard:
         for i in range(3):
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
-        loop.sessions.save(session)
+        await loop.sessions.save(session)
 
         # Ensure lock exists before /new.
         loop._consolidation_locks.setdefault(session.key, asyncio.Lock())
@@ -826,4 +826,6 @@ class TestConsolidationDeduplicationGuard:
 
         assert response is not None
         assert "new session started" in response.content.lower()
-        assert session.key not in loop._consolidation_locks
+        # Lock stays in LRU cache (evicted lazily at cap), but must be unlocked
+        lock = loop._consolidation_locks.get(session.key)
+        assert lock is None or not lock.locked()

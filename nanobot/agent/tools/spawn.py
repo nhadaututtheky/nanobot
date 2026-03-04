@@ -86,7 +86,7 @@ class SpawnTool(Tool):
             "required": ["task"],
         }
 
-    async def execute(
+    async def execute(  # type: ignore[override]
         self,
         task: str,
         label: str | None = None,

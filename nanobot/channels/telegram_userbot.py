@@ -13,6 +13,7 @@ import asyncio
 import re
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -20,6 +21,9 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramUserbotConfig
+
+if TYPE_CHECKING:
+    from telethon import TelegramClient
 
 
 class TelegramUserbotChannel(BaseChannel):
@@ -39,7 +43,7 @@ class TelegramUserbotChannel(BaseChannel):
     def __init__(self, config: TelegramUserbotConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: TelegramUserbotConfig = config
-        self._client = None
+        self._client: TelegramClient | None = None
         self._observe_set: set[str] = set(config.observe_groups)
         self._ignore_senders = [s.lower() for s in config.ignore_senders]
         self._ignore_re = [re.compile(p, re.IGNORECASE) for p in config.ignore_patterns]

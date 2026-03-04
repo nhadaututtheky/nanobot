@@ -48,14 +48,14 @@ class GraphStore:
 
         return self._cache
 
-    def _flush(self) -> None:
-        """Write the in-memory cache to disk."""
+    async def _flush(self) -> None:
+        """Write the in-memory cache to disk (non-blocking)."""
         self._ensure_dir()
         graphs = self._cache or []
         data = [g.to_dict() for g in graphs]
-        self._path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
+        json_str = json.dumps(data, indent=2, ensure_ascii=False)
+        await asyncio.to_thread(
+            self._path.write_text, json_str, encoding="utf-8"
         )
 
     # --- CRUD ---
@@ -71,7 +71,7 @@ class GraphStore:
             if len(graphs) > self.MAX_GRAPHS:
                 graphs = graphs[-self.MAX_GRAPHS :]
             self._cache = graphs
-            self._flush()
+            await self._flush()
 
     async def save(self, graph: TaskGraph) -> None:
         """Update a graph in the store (upsert)."""
@@ -94,7 +94,7 @@ class GraphStore:
             before = len(graphs)
             self._cache = [g for g in graphs if g.id != graph_id]
             if len(self._cache) < before:
-                self._flush()
+                await self._flush()
                 return True
             return False
 

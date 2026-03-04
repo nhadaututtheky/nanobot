@@ -39,7 +39,10 @@ class ZaloChannel(BaseChannel):
     async def start(self) -> None:
         """Start webhook server + token refresh loop."""
         self._running = True
-        self._http = httpx.AsyncClient(timeout=30.0)
+        self._http = httpx.AsyncClient(
+            timeout=30.0,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
 
         # Initial token refresh if we have a refresh_token
         if self._refresh_token and not self._access_token:

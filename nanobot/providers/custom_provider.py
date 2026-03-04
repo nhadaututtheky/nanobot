@@ -37,7 +37,7 @@ class CustomProvider(LLMProvider):
         msg = choice.message
         tool_calls = [
             ToolCallRequest(id=tc.id, name=tc.function.name,
-                            arguments=json_repair.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments)
+                            arguments=json_repair.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments)  # type: ignore[arg-type]
             for tc in (msg.tool_calls or [])
         ]
         u = response.usage

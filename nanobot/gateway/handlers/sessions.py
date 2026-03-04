@@ -56,7 +56,7 @@ async def handle_sessions_patch(ctx: GatewayContext, conn: ClientConnection, par
             else:
                 session.metadata[field] = val
 
-    ctx.session_manager.save(session)
+    await ctx.session_manager.save(session)
     return {"ok": True}
 
 

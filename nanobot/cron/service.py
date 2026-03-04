@@ -32,7 +32,7 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
         try:
             from zoneinfo import ZoneInfo
 
-            from croniter import croniter
+            from croniter import croniter  # type: ignore[import-untyped]
             # Use caller-provided reference time for deterministic scheduling
             base_time = now_ms / 1000
             tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
@@ -258,6 +258,7 @@ class CronService:
         # Handle one-shot jobs
         if job.schedule.kind == "at":
             if job.delete_after_run:
+                assert self._store is not None
                 self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
             else:
                 job.enabled = False
@@ -327,6 +328,38 @@ class CronService:
             logger.info("Cron: removed job {}", job_id)
 
         return removed
+
+    def ensure_default_jobs(self, defaults: list[dict[str, str]]) -> int:
+        """Ensure default jobs exist (idempotent by name). Returns count of newly added jobs."""
+        store = self._load_store()
+        existing_names = {j.name for j in store.jobs}
+        added = 0
+
+        for job_def in defaults:
+            name = job_def.get("name", "")
+            if not name or name in existing_names:
+                continue
+            expr = job_def.get("expr", "")
+            if not expr:
+                continue
+            self.add_job(
+                name=name,
+                schedule=CronSchedule(
+                    kind="cron",
+                    expr=expr,
+                    tz=job_def.get("tz", "Asia/Ho_Chi_Minh"),
+                ),
+                message=job_def.get("message", ""),
+                deliver=job_def.get("deliver", "true").lower() != "false"
+                if isinstance(job_def.get("deliver"), str)
+                else bool(job_def.get("deliver", True)),
+                channel=job_def.get("channel", "telegram"),
+                to=job_def.get("to"),
+            )
+            added += 1
+            logger.info("Cron: ensured default job '{}'", name)
+
+        return added
 
     def enable_job(self, job_id: str, enabled: bool = True) -> CronJob | None:
         """Enable or disable a job."""

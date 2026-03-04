@@ -10,6 +10,7 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.utils.scrubber import scrub_credentials
 
 
 class ContextBuilder:
@@ -50,8 +51,17 @@ class ContextBuilder:
         self._cache_skills_summary = ("", 0.0)
         self._cache_always_skills = ("", 0.0)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        granted_skills: list[str] | None = None,
+    ) -> str:
+        """Build the system prompt from identity, bootstrap files, memory, and skills.
+
+        Args:
+            skill_names: Explicit skills to load into context.
+            granted_skills: If non-empty, only these skills are visible to the agent.
+        """
         parts = [self._get_identity()]
 
         bootstrap = self._cached("_cache_bootstrap", self._load_bootstrap_files)
@@ -64,13 +74,19 @@ class ContextBuilder:
 
         def _load_always() -> str:
             names = self.skills.get_always_skills()
+            if granted_skills:
+                names = [n for n in names if n in granted_skills]
             return self.skills.load_skills_for_context(names) if names else ""
 
         always_content = self._cached("_cache_always_skills", _load_always)
         if always_content:
             parts.append(f"# Active Skills\n\n{always_content}")
 
-        skills_summary = self._cached("_cache_skills_summary", self.skills.build_skills_summary)
+        # When granted_skills is set, bypass cache (per-role filtering)
+        if granted_skills:
+            skills_summary = self.skills.build_skills_summary(granted_skills=granted_skills)
+        else:
+            skills_summary = self._cached("_cache_skills_summary", self.skills.build_skills_summary)
         if skills_summary:
             parts.append(f"""# Skills
 
@@ -139,10 +155,11 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        granted_skills: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, granted_skills)},
             *history,
             {"role": "user", "content": self._build_runtime_context(channel, chat_id)},
             {"role": "user", "content": self._build_user_content(current_message, media)},
@@ -173,9 +190,10 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         tool_name: str,
         result: str,
     ) -> list[dict[str, Any]]:
-        """Add a tool result to the message list."""
+        """Add a tool result to the message list (credentials scrubbed)."""
+        clean = scrub_credentials(result) if result else result
         messages.append(
-            {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result}
+            {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": clean}
         )
         return messages
 
