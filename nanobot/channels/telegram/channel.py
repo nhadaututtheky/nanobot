@@ -78,6 +78,13 @@ class TelegramChannel(BaseChannel):
             or TelegramGroupConfig()
         )
 
+    def _is_team_managed_group(self, chat_id: str) -> bool:
+        """Check if a group is managed by TelegramTeamManager (skip single-bot processing)."""
+        for grp in self.config.team_groups.values():
+            if grp.enabled and grp.chat_id == chat_id:
+                return True
+        return False
+
     def _is_addressed(self, message: Update.message.__class__) -> bool:  # type: ignore[name-defined]
         """Check if a group message is addressed to this bot.
 
@@ -463,6 +470,10 @@ class TelegramChannel(BaseChannel):
         sender_id = self._sender_id(user)
         is_group = message.chat.type != "private"
         str_chat_id = str(chat_id)
+
+        # --- Skip team-managed groups (handled by TelegramTeamManager) ---
+        if is_group and self._is_team_managed_group(str_chat_id):
+            return
 
         # --- DM policy check ---
         if not is_group:
